@@ -1,0 +1,1478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Network Diagram</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      color: #1a1a1a;
+      height: 100vh;
+      overflow: hidden;
+      background: #e8eaed;
+    }
+    .app {
+      display: grid;
+      grid-template-columns: 160px 1fr 240px;
+      grid-template-rows: 44px 1fr;
+      height: 100vh;
+    }
+    header {
+      grid-column: 1 / -1;
+      background: #1e293b;
+      color: #f8fafc;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 12px;
+      border-bottom: 1px solid #0f172a;
+    }
+    header h1 {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    header .hint {
+      color: #94a3b8;
+      font-size: 12px;
+      margin-left: auto;
+    }
+    .sidebar {
+      background: #f8fafc;
+      border-right: 1px solid #cbd5e1;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    .sidebar h2, .props h2 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #64748b;
+      padding: 12px 12px 6px;
+      font-weight: 600;
+    }
+    .palette {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 0 8px 12px;
+    }
+    .palette-btn {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: #fff;
+      cursor: pointer;
+      text-align: left;
+      font: inherit;
+      color: inherit;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+      transition: border-color 0.12s, background 0.12s;
+    }
+    .palette-btn:hover { border-color: #94a3b8; background: #f1f5f9; }
+    .palette-btn.active {
+      border-color: #2563eb;
+      background: #eff6ff;
+      box-shadow: 0 0 0 1px #2563eb;
+    }
+    .palette-btn .icon-wrap {
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .palette-btn .icon-wrap svg { width: 28px; height: 28px; }
+    .tools {
+      padding: 0 8px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      border-top: 1px solid #e2e8f0;
+      margin-top: 4px;
+      padding-top: 12px;
+    }
+    .tool-btn {
+      padding: 9px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: #fff;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 500;
+      color: #334155;
+      text-align: left;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .tool-btn:hover { background: #f1f5f9; border-color: #94a3b8; }
+    .tool-btn.active {
+      background: #2563eb;
+      border-color: #2563eb;
+      color: #fff;
+    }
+    .tool-btn.danger:hover { background: #fef2f2; border-color: #f87171; color: #b91c1c; }
+    .tool-btn.export {
+      background: #0f766e;
+      border-color: #0f766e;
+      color: #fff;
+      margin-top: 8px;
+    }
+    .tool-btn.export:hover { background: #0d9488; border-color: #0d9488; }
+    .tool-btn.export + .tool-btn.export { margin-top: 4px; }
+    .canvas-wrap {
+      position: relative;
+      overflow: hidden;
+      background:
+        linear-gradient(90deg, #e2e8f0 1px, transparent 1px),
+        linear-gradient(#e2e8f0 1px, transparent 1px);
+      background-size: 20px 20px;
+      background-color: #fff;
+    }
+    #canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: default;
+    }
+    #canvas.mode-place { cursor: crosshair; }
+    #canvas.mode-connect { cursor: cell; }
+    .node-group { cursor: grab; }
+    .node-group:active { cursor: grabbing; }
+    .node-group.selected .node-body {
+      stroke: #2563eb;
+      stroke-width: 2.5;
+    }
+    .node-group.selected .node-hit {
+      stroke: #2563eb;
+      stroke-opacity: 0.35;
+    }
+    .flame-group { cursor: grab; }
+    .flame-group:active { cursor: grabbing; }
+    .flame-group.selected .node-body {
+      stroke: #2563eb;
+      stroke-width: 2.5;
+      stroke-dasharray: none;
+    }
+    .link-line {
+      stroke: #475569;
+      stroke-width: 2;
+      fill: none;
+      pointer-events: stroke;
+      cursor: pointer;
+    }
+    .link-line.selected {
+      stroke: #2563eb;
+      stroke-width: 3;
+    }
+    .link-hit {
+      stroke: transparent;
+      stroke-width: 12;
+      fill: none;
+      pointer-events: stroke;
+      cursor: pointer;
+    }
+    .props {
+      background: #f8fafc;
+      border-left: 1px solid #cbd5e1;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    .props-body {
+      padding: 0 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .props-body.empty {
+      color: #94a3b8;
+      font-size: 12px;
+      padding-top: 4px;
+    }
+    .field label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: #64748b;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .field input, .field textarea {
+      width: 100%;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font: inherit;
+      background: #fff;
+      color: #1e293b;
+      resize: vertical;
+    }
+    .field input:focus, .field textarea:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    }
+    .field textarea { min-height: 100px; }
+    .field textarea.label-area { min-height: 72px; }
+    .field .meta {
+      font-size: 12px;
+      color: #64748b;
+      padding: 4px 0;
+    }
+    .status-bar {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(30, 41, 59, 0.9);
+      color: #e2e8f0;
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 12px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+      white-space: nowrap;
+      z-index: 5;
+    }
+    .status-bar.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Network Diagram</h1>
+      <span class="hint" id="modeHint">Select mode — Shift/Cmd+click multi-select, drag to move</span>
+    </header>
+
+    <aside class="sidebar">
+      <h2>Devices</h2>
+      <div class="palette" id="palette"></div>
+      <h2>Tools</h2>
+      <div class="tools">
+        <button type="button" class="tool-btn active" data-tool="select" id="btnSelect">Select / Move</button>
+        <button type="button" class="tool-btn" data-tool="connect" id="btnConnect">Connect</button>
+        <button type="button" class="tool-btn danger" id="btnDelete">Delete</button>
+        <button type="button" class="tool-btn" id="btnSave">Save JSON</button>
+        <button type="button" class="tool-btn" id="btnLoad">Load JSON</button>
+        <button type="button" class="tool-btn export" id="btnExportPng">Export PNG</button>
+        <button type="button" class="tool-btn export" id="btnExportPdf">Export PDF</button>
+        <input type="file" id="fileLoad" accept=".json,application/json" hidden />
+      </div>
+    </aside>
+
+    <main class="canvas-wrap">
+      <svg id="canvas" xmlns="http://www.w3.org/2000/svg">
+        <defs id="iconDefs"></defs>
+        <g id="flamesLayer"></g>
+        <g id="linksLayer"></g>
+        <g id="nodesLayer"></g>
+      </svg>
+      <div class="status-bar" id="statusBar"></div>
+    </main>
+
+    <aside class="props">
+      <h2>Properties</h2>
+      <div class="props-body empty" id="propsBody">Select a device or textbox</div>
+    </aside>
+  </div>
+
+  <script>
+    const DEVICE_TYPES = [
+      { type: "server", label: "Server" },
+      { type: "cloud", label: "Cloud" },
+      { type: "pc", label: "PC" },
+      { type: "router", label: "Router" },
+      { type: "switch", label: "Switch" },
+      { type: "loadbalancer", label: "Load Balancer" },
+      { type: "textbox", label: "Textbox" },
+      { type: "flame", label: "Flame" },
+    ];
+
+    const NODE_W = 88;
+    const NODE_H = 72;
+    const TEXT_PAD_X = 12;
+    const TEXT_PAD_Y = 10;
+    const TEXT_LINE_H = 16;
+    const TEXT_FONT = "12px sans-serif";
+    const TEXT_MIN_W = 80;
+    const TEXT_MIN_H = 36;
+    const TEXT_MAX_W = 280;
+    const FLAME_MIN_W = 200;
+    const FLAME_MIN_H = 140;
+    const FLAME_PAD = 24;
+    const FLAME_TITLE_H = 22;
+
+    const measureCtx = document.createElement("canvas").getContext("2d");
+
+    const state = {
+      nodes: [],
+      links: [],
+      selectedNodes: new Set(),
+      selectedLinks: new Set(),
+      mode: "select",
+      placeType: null,
+      connectFrom: null,
+      drag: null,
+      nextId: 1,
+    };
+
+    const canvas = document.getElementById("canvas");
+    const flamesLayer = document.getElementById("flamesLayer");
+    const nodesLayer = document.getElementById("nodesLayer");
+    const linksLayer = document.getElementById("linksLayer");
+    const propsBody = document.getElementById("propsBody");
+    const modeHint = document.getElementById("modeHint");
+    const statusBar = document.getElementById("statusBar");
+
+    function uid() {
+      return "n" + state.nextId++;
+    }
+
+    function showStatus(msg, ms = 2200) {
+      statusBar.textContent = msg;
+      statusBar.classList.add("show");
+      clearTimeout(showStatus._t);
+      showStatus._t = setTimeout(() => statusBar.classList.remove("show"), ms);
+    }
+
+    function setMode(mode, placeType = null) {
+      state.mode = mode;
+      state.placeType = placeType;
+      state.connectFrom = null;
+      canvas.classList.toggle("mode-place", mode === "place");
+      canvas.classList.toggle("mode-connect", mode === "connect");
+
+      document.querySelectorAll(".palette-btn").forEach((b) => {
+        b.classList.toggle("active", mode === "place" && b.dataset.type === placeType);
+      });
+      document.querySelectorAll(".tool-btn[data-tool]").forEach((b) => {
+        b.classList.toggle("active", b.dataset.tool === mode);
+      });
+
+      if (mode === "select") modeHint.textContent = "Select mode — Shift/Cmd+click multi-select, drag to move";
+      else if (mode === "place") modeHint.textContent = `Place ${labelFor(placeType)} — click on canvas`;
+      else if (mode === "connect") modeHint.textContent = "Connect mode — click first device, then second";
+    }
+
+    function labelFor(type) {
+      return DEVICE_TYPES.find((d) => d.type === type)?.label || type;
+    }
+
+    function isModClick(e) {
+      return e.shiftKey || e.metaKey || e.ctrlKey;
+    }
+
+    function isFlame(node) {
+      return node && node.type === "flame";
+    }
+
+    function isConnectable(node) {
+      return node && node.type !== "flame";
+    }
+
+    function wrapTextLines(text, maxInnerW) {
+      measureCtx.font = TEXT_FONT;
+      const raw = String(text || "Text").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      const paragraphs = raw.split("\n");
+      const lines = [];
+      for (const para of paragraphs) {
+        if (para === "") {
+          lines.push("");
+          continue;
+        }
+        const words = para.split(/(\s+)/);
+        let current = "";
+        for (const word of words) {
+          const test = current + word;
+          if (measureCtx.measureText(test).width <= maxInnerW || current === "") {
+            current = test;
+          } else {
+            lines.push(current.replace(/\s+$/, ""));
+            current = word.replace(/^\s+/, "");
+          }
+        }
+        if (current !== "" || words.length === 0) lines.push(current.replace(/\s+$/, ""));
+      }
+      return lines.length ? lines : [""];
+    }
+
+    function measureTextbox(label) {
+      measureCtx.font = TEXT_FONT;
+      const maxInner = TEXT_MAX_W - TEXT_PAD_X * 2;
+      const lines = wrapTextLines(label, maxInner);
+      let maxLineW = 0;
+      for (const line of lines) {
+        maxLineW = Math.max(maxLineW, measureCtx.measureText(line || " ").width);
+      }
+      const w = Math.max(TEXT_MIN_W, Math.min(TEXT_MAX_W, Math.ceil(maxLineW + TEXT_PAD_X * 2)));
+      const h = Math.max(TEXT_MIN_H, Math.ceil(lines.length * TEXT_LINE_H + TEXT_PAD_Y * 2));
+      return { w, h, lines };
+    }
+
+    function contentSize(node) {
+      if (node.type === "textbox") {
+        const m = measureTextbox(node.label);
+        return { w: m.w, h: m.h };
+      }
+      if (node.type === "flame") {
+        return {
+          w: node.w != null ? node.w : FLAME_MIN_W,
+          h: node.h != null ? node.h : FLAME_MIN_H,
+        };
+      }
+      return { w: NODE_W, h: NODE_H };
+    }
+
+    function nodeSize(node) {
+      return contentSize(node);
+    }
+
+    function nodeCenter(node) {
+      const { w, h } = nodeSize(node);
+      return { x: node.x + w / 2, y: node.y + h / 2 };
+    }
+
+    function nodeBounds(node) {
+      const { w, h } = nodeSize(node);
+      return { x: node.x, y: node.y, w, h, x2: node.x + w, y2: node.y + h };
+    }
+
+    function findNode(id) {
+      return state.nodes.find((n) => n.id === id);
+    }
+
+    function findLink(id) {
+      return state.links.find((l) => l.id === id);
+    }
+
+    function hasSelection() {
+      return state.selectedNodes.size > 0 || state.selectedLinks.size > 0;
+    }
+
+    function contentNodes() {
+      return state.nodes.filter((n) => n.type !== "flame");
+    }
+
+    function flameNodes() {
+      return state.nodes.filter((n) => n.type === "flame");
+    }
+
+    function pointInFlame(cx, cy, flame) {
+      const b = nodeBounds(flame);
+      return cx >= b.x && cx <= b.x2 && cy >= b.y && cy <= b.y2;
+    }
+
+    function membersOfFlame(flame) {
+      return contentNodes().filter((n) => {
+        const c = nodeCenter(n);
+        return pointInFlame(c.x, c.y, flame);
+      });
+    }
+
+    function flameArea(flame) {
+      const { w, h } = nodeSize(flame);
+      return w * h;
+    }
+
+    /** Assign each content node to the smallest flame containing its center. */
+    function membershipMap() {
+      const map = new Map();
+      const flames = flameNodes();
+      for (const n of contentNodes()) {
+        const c = nodeCenter(n);
+        let best = null;
+        let bestArea = Infinity;
+        for (const f of flames) {
+          if (!pointInFlame(c.x, c.y, f)) continue;
+          const area = flameArea(f);
+          if (area < bestArea) {
+            bestArea = area;
+            best = f;
+          }
+        }
+        if (best) {
+          if (!map.has(best.id)) map.set(best.id, []);
+          map.get(best.id).push(n);
+        }
+      }
+      return map;
+    }
+
+    function layoutFlames() {
+      // Use current geometry for membership, then resize each flame to fit members.
+      // Iterate twice so nested/overlapping cases settle.
+      for (let pass = 0; pass < 2; pass++) {
+        const membership = membershipMap();
+        for (const flame of flameNodes()) {
+          const members = membership.get(flame.id) || [];
+          if (members.length === 0) {
+            flame.w = flame.w != null ? Math.max(flame.w, FLAME_MIN_W) : FLAME_MIN_W;
+            flame.h = flame.h != null ? Math.max(flame.h, FLAME_MIN_H) : FLAME_MIN_H;
+            if (flame.w < FLAME_MIN_W) flame.w = FLAME_MIN_W;
+            if (flame.h < FLAME_MIN_H) flame.h = FLAME_MIN_H;
+            continue;
+          }
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          for (const m of members) {
+            const b = nodeBounds(m);
+            minX = Math.min(minX, b.x);
+            minY = Math.min(minY, b.y);
+            maxX = Math.max(maxX, b.x2);
+            maxY = Math.max(maxY, b.y2);
+          }
+          flame.x = minX - FLAME_PAD;
+          flame.y = minY - FLAME_PAD - FLAME_TITLE_H;
+          flame.w = Math.max(FLAME_MIN_W, maxX - minX + FLAME_PAD * 2);
+          flame.h = Math.max(FLAME_MIN_H, maxY - minY + FLAME_PAD * 2 + FLAME_TITLE_H);
+          if (flame.x < 0) {
+            flame.w += flame.x;
+            flame.x = 0;
+            flame.w = Math.max(FLAME_MIN_W, flame.w);
+          }
+          if (flame.y < 0) {
+            flame.h += flame.y;
+            flame.y = 0;
+            flame.h = Math.max(FLAME_MIN_H, flame.h);
+          }
+        }
+      }
+    }
+
+    function collectDragIds(primaryId) {
+      const ids = new Set(
+        state.selectedNodes.has(primaryId) ? [...state.selectedNodes] : [primaryId]
+      );
+      // If a flame is in the drag set, include its current members
+      const membership = membershipMap();
+      for (const id of [...ids]) {
+        const n = findNode(id);
+        if (isFlame(n)) {
+          const members = membership.get(id) || membersOfFlame(n);
+          for (const m of members) ids.add(m.id);
+        }
+      }
+      return [...ids];
+    }
+
+    // --- Icons ---
+    function buildIconDefs() {
+      const defs = document.getElementById("iconDefs");
+      defs.innerHTML = `
+        <symbol id="icon-server" viewBox="0 0 48 48">
+          <rect x="8" y="6" width="32" height="12" rx="2" fill="#64748b" stroke="#334155" stroke-width="1.5"/>
+          <rect x="8" y="18" width="32" height="12" rx="2" fill="#94a3b8" stroke="#334155" stroke-width="1.5"/>
+          <rect x="8" y="30" width="32" height="12" rx="2" fill="#64748b" stroke="#334155" stroke-width="1.5"/>
+          <circle cx="14" cy="12" r="2" fill="#22c55e"/>
+          <circle cx="14" cy="24" r="2" fill="#22c55e"/>
+          <circle cx="14" cy="36" r="2" fill="#22c55e"/>
+          <rect x="20" y="10" width="14" height="4" rx="1" fill="#e2e8f0"/>
+          <rect x="20" y="22" width="14" height="4" rx="1" fill="#e2e8f0"/>
+          <rect x="20" y="34" width="14" height="4" rx="1" fill="#e2e8f0"/>
+        </symbol>
+        <symbol id="icon-cloud" viewBox="0 0 48 48">
+          <path d="M14 34c-4.4 0-8-3.1-8-7s3.6-7 8-7c.5-5 4.7-9 9.8-9 4.5 0 8.3 2.9 9.5 7 3.9.4 7 3.5 7 7.5 0 4.1-3.4 7.5-7.5 7.5H14z"
+            fill="#38bdf8" stroke="#0284c7" stroke-width="1.5"/>
+        </symbol>
+        <symbol id="icon-pc" viewBox="0 0 48 48">
+          <rect x="8" y="8" width="32" height="24" rx="2" fill="#94a3b8" stroke="#334155" stroke-width="1.5"/>
+          <rect x="11" y="11" width="26" height="18" fill="#1e293b"/>
+          <rect x="18" y="34" width="12" height="3" fill="#64748b"/>
+          <rect x="14" y="37" width="20" height="3" rx="1" fill="#475569"/>
+        </symbol>
+        <symbol id="icon-router" viewBox="0 0 48 48">
+          <rect x="6" y="20" width="36" height="16" rx="3" fill="#f59e0b" stroke="#b45309" stroke-width="1.5"/>
+          <circle cx="14" cy="28" r="2.5" fill="#fef3c7"/>
+          <circle cx="22" cy="28" r="2.5" fill="#fef3c7"/>
+          <line x1="16" y1="12" x2="16" y2="20" stroke="#b45309" stroke-width="2"/>
+          <line x1="32" y1="12" x2="32" y2="20" stroke="#b45309" stroke-width="2"/>
+          <circle cx="16" cy="10" r="2.5" fill="#fbbf24" stroke="#b45309" stroke-width="1"/>
+          <circle cx="32" cy="10" r="2.5" fill="#fbbf24" stroke="#b45309" stroke-width="1"/>
+          <rect x="30" y="25" width="8" height="6" rx="1" fill="#78350f"/>
+        </symbol>
+        <symbol id="icon-switch" viewBox="0 0 48 48">
+          <rect x="6" y="14" width="36" height="20" rx="3" fill="#8b5cf6" stroke="#5b21b6" stroke-width="1.5"/>
+          <rect x="10" y="20" width="5" height="8" rx="1" fill="#ede9fe"/>
+          <rect x="18" y="20" width="5" height="8" rx="1" fill="#ede9fe"/>
+          <rect x="26" y="20" width="5" height="8" rx="1" fill="#ede9fe"/>
+          <rect x="34" y="20" width="5" height="8" rx="1" fill="#ede9fe"/>
+          <circle cx="12.5" cy="18" r="1.2" fill="#4ade80"/>
+          <circle cx="20.5" cy="18" r="1.2" fill="#4ade80"/>
+          <circle cx="28.5" cy="18" r="1.2" fill="#fbbf24"/>
+          <circle cx="36.5" cy="18" r="1.2" fill="#4ade80"/>
+        </symbol>
+        <symbol id="icon-loadbalancer" viewBox="0 0 48 48">
+          <rect x="14" y="6" width="20" height="12" rx="2" fill="#14b8a6" stroke="#0f766e" stroke-width="1.5"/>
+          <path d="M24 18v6M24 24L12 30M24 24L36 30" stroke="#0f766e" stroke-width="2" fill="none"/>
+          <rect x="4" y="30" width="16" height="10" rx="2" fill="#5eead4" stroke="#0f766e" stroke-width="1.5"/>
+          <rect x="28" y="30" width="16" height="10" rx="2" fill="#5eead4" stroke="#0f766e" stroke-width="1.5"/>
+        </symbol>
+        <symbol id="icon-flame" viewBox="0 0 48 48">
+          <rect x="6" y="10" width="36" height="28" rx="4" fill="#ffedd5" stroke="#f97316" stroke-width="1.5" stroke-dasharray="4 2"/>
+          <text x="24" y="27" text-anchor="middle" font-size="9" fill="#c2410c" font-family="sans-serif" font-weight="600">Zone</text>
+        </symbol>
+      `;
+    }
+
+    function buildPalette() {
+      const palette = document.getElementById("palette");
+      palette.innerHTML = DEVICE_TYPES.map((d) => {
+        let icon;
+        if (d.type === "textbox") {
+          icon = `<svg viewBox="0 0 32 32" width="28" height="28"><rect x="3" y="8" width="26" height="16" rx="2" fill="#fff" stroke="#64748b" stroke-width="1.5"/><text x="16" y="19" text-anchor="middle" font-size="10" fill="#64748b" font-family="sans-serif">Aa</text></svg>`;
+        } else {
+          icon = `<svg viewBox="0 0 48 48"><use href="#icon-${d.type}"/></svg>`;
+        }
+        return `<button type="button" class="palette-btn" data-type="${d.type}">
+          <span class="icon-wrap">${icon}</span>
+          <span>${d.label}</span>
+        </button>`;
+      }).join("");
+
+      palette.querySelectorAll(".palette-btn").forEach((btn) => {
+        btn.addEventListener("click", () => setMode("place", btn.dataset.type));
+      });
+    }
+
+    // --- Render ---
+    function render() {
+      layoutFlames();
+      renderFlames();
+      renderLinks();
+      renderNodes();
+      renderProps();
+    }
+
+    function renderVisualOnly() {
+      renderFlames();
+      renderLinks();
+      renderNodes();
+    }
+
+    function renderFlames() {
+      flamesLayer.innerHTML = "";
+      for (const node of flameNodes()) {
+        const { w, h } = nodeSize(node);
+        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        g.setAttribute(
+          "class",
+          "flame-group node-group" + (state.selectedNodes.has(node.id) ? " selected" : "")
+        );
+        g.setAttribute("transform", `translate(${node.x},${node.y})`);
+        g.dataset.id = node.id;
+
+        const body = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        body.setAttribute("class", "node-body");
+        body.setAttribute("width", w);
+        body.setAttribute("height", h);
+        body.setAttribute("rx", 10);
+        body.setAttribute("fill", "rgba(255, 237, 213, 0.55)");
+        body.setAttribute("stroke", "#f97316");
+        body.setAttribute("stroke-width", 2);
+        body.setAttribute("stroke-dasharray", "8 4");
+        g.appendChild(body);
+
+        const titleBg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        titleBg.setAttribute("x", 8);
+        titleBg.setAttribute("y", 6);
+        titleBg.setAttribute("width", Math.max(40, Math.min(w - 16, 160)));
+        titleBg.setAttribute("height", 18);
+        titleBg.setAttribute("rx", 4);
+        titleBg.setAttribute("fill", "rgba(255, 247, 237, 0.9)");
+        g.appendChild(titleBg);
+
+        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        text.setAttribute("x", 16);
+        text.setAttribute("y", 19);
+        text.setAttribute("font-size", "12");
+        text.setAttribute("font-family", "sans-serif");
+        text.setAttribute("font-weight", "600");
+        text.setAttribute("fill", "#c2410c");
+        text.textContent = truncate(node.label || "Flame", 22);
+        g.appendChild(text);
+
+        if (node.description) {
+          const badge = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          badge.setAttribute("cx", w - 10);
+          badge.setAttribute("cy", 12);
+          badge.setAttribute("r", 4);
+          badge.setAttribute("fill", "#2563eb");
+          g.appendChild(badge);
+        }
+
+        g.addEventListener("mousedown", (e) => onNodeMouseDown(e, node));
+        flamesLayer.appendChild(g);
+      }
+    }
+
+    function renderLinks() {
+      linksLayer.innerHTML = "";
+      for (const link of state.links) {
+        const a = findNode(link.from);
+        const b = findNode(link.to);
+        if (!a || !b || isFlame(a) || isFlame(b)) continue;
+        const ca = nodeCenter(a);
+        const cb = nodeCenter(b);
+        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        g.dataset.id = link.id;
+
+        const hit = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        hit.setAttribute("x1", ca.x);
+        hit.setAttribute("y1", ca.y);
+        hit.setAttribute("x2", cb.x);
+        hit.setAttribute("y2", cb.y);
+        hit.setAttribute("class", "link-hit");
+
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", ca.x);
+        line.setAttribute("y1", ca.y);
+        line.setAttribute("x2", cb.x);
+        line.setAttribute("y2", cb.y);
+        line.setAttribute("class", "link-line" + (state.selectedLinks.has(link.id) ? " selected" : ""));
+
+        g.appendChild(hit);
+        g.appendChild(line);
+
+        const onSelect = (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          if (state.mode === "connect") return;
+          selectLink(link.id, isModClick(e));
+        };
+        hit.addEventListener("mousedown", onSelect);
+        line.addEventListener("mousedown", onSelect);
+
+        linksLayer.appendChild(g);
+      }
+    }
+
+    function truncate(str, n) {
+      if (!str) return "";
+      return str.length > n ? str.slice(0, n - 1) + "…" : str;
+    }
+
+    function renderNodes() {
+      nodesLayer.innerHTML = "";
+      for (const node of contentNodes()) {
+        const { w, h } = nodeSize(node);
+        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        g.setAttribute("class", "node-group" + (state.selectedNodes.has(node.id) ? " selected" : ""));
+        g.setAttribute("transform", `translate(${node.x},${node.y})`);
+        g.dataset.id = node.id;
+
+        if (node.type === "textbox") {
+          const measured = measureTextbox(node.label);
+          const body = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          body.setAttribute("class", "node-body");
+          body.setAttribute("width", w);
+          body.setAttribute("height", h);
+          body.setAttribute("rx", 6);
+          body.setAttribute("fill", "#fffbeb");
+          body.setAttribute("stroke", "#d97706");
+          body.setAttribute("stroke-width", 1.5);
+          g.appendChild(body);
+
+          const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          text.setAttribute("x", w / 2);
+          text.setAttribute("text-anchor", "middle");
+          text.setAttribute("font-size", "12");
+          text.setAttribute("font-family", "sans-serif");
+          text.setAttribute("fill", "#92400e");
+          const startY = TEXT_PAD_Y + TEXT_LINE_H * 0.75;
+          measured.lines.forEach((line, i) => {
+            const tspan = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
+            tspan.setAttribute("x", w / 2);
+            tspan.setAttribute("y", startY + i * TEXT_LINE_H);
+            tspan.textContent = line || " ";
+            text.appendChild(tspan);
+          });
+          g.appendChild(text);
+        } else {
+          const hit = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          hit.setAttribute("class", "node-hit");
+          hit.setAttribute("width", w);
+          hit.setAttribute("height", h);
+          hit.setAttribute("rx", 8);
+          hit.setAttribute("fill", "#f8fafc");
+          hit.setAttribute("stroke", "#cbd5e1");
+          hit.setAttribute("stroke-width", 1.5);
+          g.appendChild(hit);
+
+          const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+          use.setAttribute("href", `#icon-${node.type}`);
+          use.setAttribute("x", (w - 40) / 2);
+          use.setAttribute("y", 4);
+          use.setAttribute("width", 40);
+          use.setAttribute("height", 40);
+          g.appendChild(use);
+
+          const body = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          body.setAttribute("class", "node-body");
+          body.setAttribute("width", w);
+          body.setAttribute("height", h);
+          body.setAttribute("rx", 8);
+          body.setAttribute("fill", "none");
+          body.setAttribute("stroke", "transparent");
+          body.setAttribute("stroke-width", 2);
+          g.appendChild(body);
+
+          const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          text.setAttribute("x", w / 2);
+          text.setAttribute("y", h - 8);
+          text.setAttribute("text-anchor", "middle");
+          text.setAttribute("font-size", "11");
+          text.setAttribute("font-family", "sans-serif");
+          text.setAttribute("font-weight", "600");
+          text.setAttribute("fill", "#334155");
+          text.textContent = truncate(node.label || labelFor(node.type), 12);
+          g.appendChild(text);
+        }
+
+        if (node.description) {
+          const badge = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          badge.setAttribute("cx", w - 8);
+          badge.setAttribute("cy", 8);
+          badge.setAttribute("r", 4);
+          badge.setAttribute("fill", "#2563eb");
+          g.appendChild(badge);
+        }
+
+        g.addEventListener("mousedown", (e) => onNodeMouseDown(e, node));
+        nodesLayer.appendChild(g);
+      }
+    }
+
+    function renderProps() {
+      const nCount = state.selectedNodes.size;
+      const lCount = state.selectedLinks.size;
+
+      if (nCount === 0 && lCount === 0) {
+        propsBody.className = "props-body empty";
+        propsBody.textContent = "Select a device or textbox";
+        return;
+      }
+
+      if (nCount + lCount > 1) {
+        propsBody.className = "props-body";
+        const parts = [];
+        if (nCount) parts.push(`${nCount} item${nCount > 1 ? "s" : ""}`);
+        if (lCount) parts.push(`${lCount} link${lCount > 1 ? "s" : ""}`);
+        propsBody.innerHTML = `
+          <div class="field">
+            <label>Selection</label>
+            <div class="meta">${parts.join(", ")} selected</div>
+          </div>
+          <div class="field">
+            <label>Hint</label>
+            <div class="meta">Drag to move together. Delete removes all selected.</div>
+          </div>
+        `;
+        return;
+      }
+
+      if (nCount === 1) {
+        const id = [...state.selectedNodes][0];
+        const node = findNode(id);
+        if (!node) {
+          propsBody.className = "props-body empty";
+          propsBody.textContent = "Select a device or textbox";
+          return;
+        }
+        const isText = node.type === "textbox";
+        const flame = isFlame(node);
+        const memberCount = flame ? (membershipMap().get(node.id) || []).length : 0;
+        propsBody.className = "props-body";
+        propsBody.innerHTML = `
+          <div class="field">
+            <label>Type</label>
+            <div class="meta">${labelFor(node.type)}</div>
+          </div>
+          ${
+            flame
+              ? `<div class="field"><label>Members</label><div class="meta">${memberCount} device${memberCount === 1 ? "" : "s"} inside</div></div>`
+              : ""
+          }
+          <div class="field">
+            <label>${isText ? "Text" : flame ? "Title" : "Label"}</label>
+            ${
+              isText
+                ? `<textarea id="propLabel" class="label-area" placeholder="Text…">${escapeHtml(node.label || "")}</textarea>`
+                : `<input type="text" id="propLabel" value="${escapeAttr(node.label || "")}" placeholder="Name" />`
+            }
+          </div>
+          <div class="field">
+            <label>Description</label>
+            <textarea id="propDesc" placeholder="Notes…">${escapeHtml(node.description || "")}</textarea>
+          </div>
+        `;
+        const labelEl = document.getElementById("propLabel");
+        const descEl = document.getElementById("propDesc");
+        labelEl.addEventListener("input", () => {
+          node.label = labelEl.value;
+          renderVisualOnly();
+        });
+        descEl.addEventListener("input", () => {
+          node.description = descEl.value;
+          renderVisualOnly();
+        });
+        return;
+      }
+
+      if (lCount === 1) {
+        const id = [...state.selectedLinks][0];
+        const link = findLink(id);
+        if (!link) {
+          propsBody.className = "props-body empty";
+          propsBody.textContent = "Select a device or textbox";
+          return;
+        }
+        const a = findNode(link.from);
+        const b = findNode(link.to);
+        propsBody.className = "props-body";
+        propsBody.innerHTML = `
+          <div class="field">
+            <label>Connection</label>
+            <div class="meta">${escapeHtml(a?.label || labelFor(a?.type))} → ${escapeHtml(b?.label || labelFor(b?.type))}</div>
+          </div>
+          <div class="field">
+            <label>Hint</label>
+            <div class="meta">Press Delete to remove this link</div>
+          </div>
+        `;
+      }
+    }
+
+    function escapeAttr(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    }
+    function escapeHtml(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    function selectNode(id, additive) {
+      if (!additive) {
+        state.selectedNodes.clear();
+        state.selectedLinks.clear();
+        state.selectedNodes.add(id);
+      } else {
+        if (state.selectedNodes.has(id)) state.selectedNodes.delete(id);
+        else state.selectedNodes.add(id);
+      }
+      render();
+    }
+
+    function selectLink(id, additive) {
+      if (!additive) {
+        state.selectedNodes.clear();
+        state.selectedLinks.clear();
+        state.selectedLinks.add(id);
+      } else {
+        if (state.selectedLinks.has(id)) state.selectedLinks.delete(id);
+        else state.selectedLinks.add(id);
+      }
+      render();
+    }
+
+    function clearSelection() {
+      state.selectedNodes.clear();
+      state.selectedLinks.clear();
+      render();
+    }
+
+    // --- Interaction ---
+    function svgPoint(e) {
+      const pt = canvas.createSVGPoint();
+      pt.x = e.clientX;
+      pt.y = e.clientY;
+      const ctm = canvas.getScreenCTM().inverse();
+      return pt.matrixTransform(ctm);
+    }
+
+    function onNodeMouseDown(e, node) {
+      e.stopPropagation();
+      e.preventDefault();
+
+      if (state.mode === "connect") {
+        if (!isConnectable(node)) {
+          showStatus("Cannot connect a Flame");
+          return;
+        }
+        if (!state.connectFrom) {
+          state.connectFrom = node.id;
+          selectNode(node.id, false);
+          showStatus("Now click the target device");
+          modeHint.textContent = "Connect mode — click target device";
+        } else if (state.connectFrom === node.id) {
+          showStatus("Pick a different device");
+        } else {
+          const exists = state.links.some(
+            (l) =>
+              (l.from === state.connectFrom && l.to === node.id) ||
+              (l.from === node.id && l.to === state.connectFrom)
+          );
+          if (!exists) {
+            state.links.push({ id: uid(), from: state.connectFrom, to: node.id });
+            showStatus("Connected");
+          } else {
+            showStatus("Already connected");
+          }
+          state.connectFrom = null;
+          selectNode(node.id, false);
+          modeHint.textContent = "Connect mode — click first device, then second";
+          render();
+        }
+        return;
+      }
+
+      if (state.mode === "place") return;
+
+      const additive = isModClick(e);
+      if (additive) {
+        selectNode(node.id, true);
+      } else if (!state.selectedNodes.has(node.id)) {
+        selectNode(node.id, false);
+      } else {
+        state.selectedLinks.clear();
+        renderVisualOnly();
+        renderProps();
+      }
+
+      if (additive && !state.selectedNodes.has(node.id)) return;
+
+      const p = svgPoint(e);
+      const moveIds = collectDragIds(node.id);
+      const origins = {};
+      for (const id of moveIds) {
+        const n = findNode(id);
+        if (n) origins[id] = { x: n.x, y: n.y, w: n.w, h: n.h };
+      }
+      state.drag = {
+        startX: p.x,
+        startY: p.y,
+        origins,
+        primaryId: node.id,
+      };
+    }
+
+    canvas.addEventListener("mousedown", (e) => {
+      if (e.target !== canvas && e.target.closest(".node-group, .flame-group, .link-hit, .link-line")) return;
+
+      if (state.mode === "place" && state.placeType) {
+        const p = svgPoint(e);
+        const type = state.placeType;
+        let label = labelFor(type);
+        if (type === "textbox") label = "Text";
+        if (type === "flame") label = "Flame";
+        const temp = { type, label, w: FLAME_MIN_W, h: FLAME_MIN_H };
+        const { w, h } = nodeSize(temp);
+        const node = {
+          id: uid(),
+          type,
+          x: Math.max(0, p.x - w / 2),
+          y: Math.max(0, p.y - h / 2),
+          label,
+          description: "",
+        };
+        if (type === "flame") {
+          node.w = FLAME_MIN_W;
+          node.h = FLAME_MIN_H;
+        }
+        state.nodes.push(node);
+        selectNode(node.id, false);
+        setMode("select");
+        showStatus(`Added ${labelFor(type)}`);
+        return;
+      }
+
+      if (state.mode === "connect") {
+        state.connectFrom = null;
+        modeHint.textContent = "Connect mode — click first device, then second";
+        clearSelection();
+        return;
+      }
+
+      clearSelection();
+    });
+
+    window.addEventListener("mousemove", (e) => {
+      if (!state.drag) return;
+      const p = svgPoint(e);
+      const dx = p.x - state.drag.startX;
+      const dy = p.y - state.drag.startY;
+      for (const [id, origin] of Object.entries(state.drag.origins)) {
+        const node = findNode(id);
+        if (!node) continue;
+        node.x = Math.max(0, origin.x + dx);
+        node.y = Math.max(0, origin.y + dy);
+      }
+      // During drag of non-flame content, skip full layout to avoid fighting the user;
+      // still re-layout when only flames move with members (positions already synced).
+      const draggingFlame = Object.keys(state.drag.origins).some((id) => isFlame(findNode(id)));
+      if (draggingFlame) {
+        renderVisualOnly();
+      } else {
+        layoutFlames();
+        renderVisualOnly();
+      }
+    });
+
+    window.addEventListener("mouseup", () => {
+      if (state.drag) {
+        state.drag = null;
+        render();
+      }
+    });
+
+    document.getElementById("btnSelect").addEventListener("click", () => setMode("select"));
+    document.getElementById("btnConnect").addEventListener("click", () => setMode("connect"));
+    document.getElementById("btnDelete").addEventListener("click", deleteSelected);
+
+    function deleteSelected() {
+      if (!hasSelection()) {
+        showStatus("Nothing selected");
+        return;
+      }
+      const nodeIds = new Set(state.selectedNodes);
+      const linkIds = new Set(state.selectedLinks);
+      const count = nodeIds.size + linkIds.size;
+
+      if (nodeIds.size) {
+        state.nodes = state.nodes.filter((n) => !nodeIds.has(n.id));
+        state.links = state.links.filter(
+          (l) => !nodeIds.has(l.from) && !nodeIds.has(l.to) && !linkIds.has(l.id)
+        );
+      } else {
+        state.links = state.links.filter((l) => !linkIds.has(l.id));
+      }
+
+      clearSelection();
+      showStatus(`Deleted ${count} item${count > 1 ? "s" : ""}`);
+    }
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (e.target.matches("input, textarea")) return;
+        e.preventDefault();
+        deleteSelected();
+      }
+      if (e.key === "Escape") {
+        setMode("select");
+        clearSelection();
+      }
+    });
+
+    // --- Filename helper ---
+    function askFilename(defaultBase, ext) {
+      const raw = prompt(`File name (.${ext}):`, defaultBase);
+      if (raw == null) return null;
+      let name = raw.trim();
+      if (!name) return null;
+      name = name.replace(/[\\/:*?"<>|]/g, "-");
+      name = name.replace(/\.+$/, "");
+      const lower = name.toLowerCase();
+      if (lower.endsWith("." + ext)) {
+        name = name.slice(0, -(ext.length + 1));
+      }
+      name = name.trim();
+      if (!name) return null;
+      return name + "." + ext;
+    }
+
+    // --- Save / Load JSON ---
+    document.getElementById("btnSave").addEventListener("click", saveDiagram);
+    document.getElementById("btnLoad").addEventListener("click", () => {
+      document.getElementById("fileLoad").value = "";
+      document.getElementById("fileLoad").click();
+    });
+    document.getElementById("fileLoad").addEventListener("change", (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (file) loadDiagram(file);
+    });
+
+    function saveDiagram() {
+      const filename = askFilename("network-diagram", "json");
+      if (!filename) {
+        showStatus("Save cancelled");
+        return;
+      }
+      const data = {
+        version: 1,
+        nodes: state.nodes,
+        links: state.links,
+        nextId: state.nextId,
+      };
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      downloadBlob(blob, filename);
+      showStatus("Saved " + filename);
+    }
+
+    function loadDiagram(file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result);
+          if (!data || !Array.isArray(data.nodes) || !Array.isArray(data.links)) {
+            showStatus("Invalid diagram file");
+            return;
+          }
+          const validTypes = new Set(DEVICE_TYPES.map((d) => d.type));
+          const nodes = data.nodes
+            .filter((n) => n && n.id && validTypes.has(n.type) && typeof n.x === "number" && typeof n.y === "number")
+            .map((n) => {
+              const node = {
+                id: String(n.id),
+                type: n.type,
+                x: n.x,
+                y: n.y,
+                label: n.label != null ? String(n.label) : labelFor(n.type),
+                description: n.description != null ? String(n.description) : "",
+              };
+              if (n.type === "flame") {
+                node.w = typeof n.w === "number" ? n.w : FLAME_MIN_W;
+                node.h = typeof n.h === "number" ? n.h : FLAME_MIN_H;
+              }
+              return node;
+            });
+          const nodeIds = new Set(nodes.map((n) => n.id));
+          const links = data.links
+            .filter((l) => l && l.id && nodeIds.has(l.from) && nodeIds.has(l.to))
+            .map((l) => ({ id: String(l.id), from: String(l.from), to: String(l.to) }));
+
+          let nextId = Number(data.nextId) || 1;
+          for (const n of nodes) {
+            const m = String(n.id).match(/^n(\d+)$/);
+            if (m) nextId = Math.max(nextId, Number(m[1]) + 1);
+          }
+          for (const l of links) {
+            const m = String(l.id).match(/^n(\d+)$/);
+            if (m) nextId = Math.max(nextId, Number(m[1]) + 1);
+          }
+
+          state.nodes = nodes;
+          state.links = links;
+          state.nextId = nextId;
+          state.selectedNodes.clear();
+          state.selectedLinks.clear();
+          state.connectFrom = null;
+          state.drag = null;
+          setMode("select");
+          render();
+          showStatus("Loaded diagram");
+        } catch {
+          showStatus("Failed to load file");
+        }
+      };
+      reader.onerror = () => showStatus("Failed to read file");
+      reader.readAsText(file);
+    }
+
+    // --- Export helpers ---
+    function diagramBounds() {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const node of state.nodes) {
+        const { w, h } = nodeSize(node);
+        minX = Math.min(minX, node.x);
+        minY = Math.min(minY, node.y);
+        maxX = Math.max(maxX, node.x + w);
+        maxY = Math.max(maxY, node.y + h);
+      }
+      const pad = 40;
+      minX -= pad;
+      minY -= pad;
+      maxX += pad;
+      maxY += pad;
+      return {
+        minX,
+        minY,
+        width: Math.max(200, maxX - minX),
+        height: Math.max(200, maxY - minY),
+      };
+    }
+
+    function renderExportCanvas(callback) {
+      if (state.nodes.length === 0) {
+        showStatus("Nothing to export");
+        return;
+      }
+      layoutFlames();
+      const { minX, minY, width, height } = diagramBounds();
+      const clone = canvas.cloneNode(true);
+      clone.setAttribute("width", width);
+      clone.setAttribute("height", height);
+      clone.setAttribute("viewBox", `${minX} ${minY} ${width} ${height}`);
+      clone.style.background = "#ffffff";
+
+      clone.querySelectorAll(".link-line").forEach((el) => {
+        el.setAttribute("stroke", el.classList.contains("selected") ? "#2563eb" : "#475569");
+        el.setAttribute("stroke-width", el.classList.contains("selected") ? "3" : "2");
+        el.setAttribute("fill", "none");
+      });
+      clone.querySelectorAll(".link-hit").forEach((el) => el.remove());
+      clone.querySelectorAll(".node-group.selected .node-body, .flame-group.selected .node-body").forEach((el) => {
+        el.setAttribute("stroke", "#2563eb");
+        el.setAttribute("stroke-width", "2.5");
+      });
+
+      const serializer = new XMLSerializer();
+      let svgStr = serializer.serializeToString(clone);
+      if (!svgStr.includes("xmlns=")) {
+        svgStr = svgStr.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"');
+      }
+
+      const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        const scale = 2;
+        const c = document.createElement("canvas");
+        c.width = width * scale;
+        c.height = height * scale;
+        const ctx = c.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, c.width, c.height);
+        ctx.scale(scale, scale);
+        ctx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+        callback(c, width, height);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        showStatus("Export failed");
+      };
+      img.src = url;
+    }
+
+    function downloadBlob(blob, filename) {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    document.getElementById("btnExportPng").addEventListener("click", exportPng);
+    document.getElementById("btnExportPdf").addEventListener("click", exportPdf);
+
+    function exportPng() {
+      const filename = askFilename("network-diagram", "png");
+      if (!filename) {
+        showStatus("Export cancelled");
+        return;
+      }
+      renderExportCanvas((c) => {
+        c.toBlob((pngBlob) => {
+          if (!pngBlob) {
+            showStatus("Export failed");
+            return;
+          }
+          downloadBlob(pngBlob, filename);
+          showStatus("Exported " + filename);
+        }, "image/png");
+      });
+    }
+
+    function exportPdf() {
+      const filename = askFilename("network-diagram", "pdf");
+      if (!filename) {
+        showStatus("Export cancelled");
+        return;
+      }
+      renderExportCanvas((c, width, height) => {
+        const dataUrl = c.toDataURL("image/jpeg", 0.92);
+        const jpegBase64 = dataUrl.split(",")[1];
+        const jpegBytes = base64ToBytes(jpegBase64);
+        const pdfBlob = buildPdfFromJpeg(jpegBytes, c.width, c.height, width, height);
+        downloadBlob(pdfBlob, filename);
+        showStatus("Exported " + filename);
+      });
+    }
+
+    function base64ToBytes(b64) {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return bytes;
+    }
+
+    function concatBytes(...parts) {
+      let len = 0;
+      for (const p of parts) len += p.length;
+      const out = new Uint8Array(len);
+      let off = 0;
+      for (const p of parts) {
+        out.set(p, off);
+        off += p.length;
+      }
+      return out;
+    }
+
+    function buildPdfFromJpeg(jpegBytes, imgW, imgH, pageW, pageH) {
+      const enc = new TextEncoder();
+      const header = enc.encode("%PDF-1.4\n");
+      const objs = [];
+
+      objs.push(enc.encode("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"));
+      objs.push(enc.encode("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"));
+      objs.push(
+        enc.encode(
+          `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW.toFixed(2)} ${pageH.toFixed(2)}] /Contents 4 0 R /Resources << /XObject << /Im0 5 0 R >> >> >>\nendobj\n`
+        )
+      );
+
+      const stream = `q\n${pageW.toFixed(2)} 0 0 ${pageH.toFixed(2)} 0 0 cm\n/Im0 Do\nQ\n`;
+      const streamBytes = enc.encode(stream);
+      objs.push(
+        concatBytes(
+          enc.encode(`4 0 obj\n<< /Length ${streamBytes.length} >>\nstream\n`),
+          streamBytes,
+          enc.encode("\nendstream\nendobj\n")
+        )
+      );
+
+      objs.push(
+        concatBytes(
+          enc.encode(
+            `5 0 obj\n<< /Type /XObject /Subtype /Image /Width ${imgW} /Height ${imgH} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.length} >>\nstream\n`
+          ),
+          jpegBytes,
+          enc.encode("\nendstream\nendobj\n")
+        )
+      );
+
+      let pdf = header;
+      const xrefOffsets = [0];
+      let offset = header.length;
+      for (const obj of objs) {
+        xrefOffsets.push(offset);
+        pdf = concatBytes(pdf, obj);
+        offset += obj.length;
+      }
+
+      const xrefStart = offset;
+      let xref = `xref\n0 ${objs.length + 1}\n`;
+      xref += "0000000000 65535 f \n";
+      for (let i = 1; i <= objs.length; i++) {
+        xref += String(xrefOffsets[i]).padStart(10, "0") + " 00000 n \n";
+      }
+      xref += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`;
+
+      return new Blob([concatBytes(pdf, enc.encode(xref))], { type: "application/pdf" });
+    }
+
+    // Init
+    buildIconDefs();
+    buildPalette();
+    setMode("select");
+    render();
+  </script>
+</body>
+</html>
