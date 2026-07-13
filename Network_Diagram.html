@@ -40,6 +40,30 @@
       font-size: 12px;
       margin-left: auto;
     }
+    .zoom-controls {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .zoom-controls button {
+      width: 28px;
+      height: 28px;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      background: #334155;
+      color: #f8fafc;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      line-height: 1;
+    }
+    .zoom-controls button:hover { background: #475569; }
+    .zoom-controls .zoom-label {
+      min-width: 44px;
+      text-align: center;
+      font-size: 12px;
+      color: #cbd5e1;
+    }
     .sidebar {
       background: #f8fafc;
       border-right: 1px solid #cbd5e1;
@@ -69,13 +93,14 @@
       border: 1px solid transparent;
       border-radius: 8px;
       background: #fff;
-      cursor: pointer;
+      cursor: grab;
       text-align: left;
       font: inherit;
       color: inherit;
       box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
       transition: border-color 0.12s, background 0.12s;
     }
+    .palette-btn:active { cursor: grabbing; }
     .palette-btn:hover { border-color: #94a3b8; background: #f1f5f9; }
     .palette-btn.active {
       border-color: #2563eb;
@@ -144,6 +169,8 @@
     }
     #canvas.mode-place { cursor: crosshair; }
     #canvas.mode-connect { cursor: cell; }
+    #canvas.mode-pan { cursor: grab; }
+    #canvas.mode-pan.panning { cursor: grabbing; }
     .node-group { cursor: grab; }
     .node-group:active { cursor: grabbing; }
     .node-group.selected .node-body {
@@ -157,7 +184,7 @@
     .flame-group { cursor: grab; }
     .flame-group:active { cursor: grabbing; }
     .flame-group.selected .node-body {
-      stroke: #2563eb;
+      stroke: #2563eb !important;
       stroke-width: 2.5;
       stroke-dasharray: none;
     }
@@ -206,7 +233,7 @@
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
-    .field input, .field textarea {
+    .field input, .field textarea, .field select {
       width: 100%;
       border: 1px solid #cbd5e1;
       border-radius: 6px;
@@ -216,17 +243,40 @@
       color: #1e293b;
       resize: vertical;
     }
-    .field input:focus, .field textarea:focus {
+    .field input:focus, .field textarea:focus, .field select:focus {
       outline: none;
       border-color: #2563eb;
       box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
     }
     .field textarea { min-height: 100px; }
     .field textarea.label-area { min-height: 72px; }
+    .field textarea.cells-area { min-height: 120px; font-family: ui-monospace, monospace; font-size: 12px; }
     .field .meta {
       font-size: 12px;
       color: #64748b;
       padding: 4px 0;
+    }
+    .field .row {
+      display: flex;
+      gap: 8px;
+    }
+    .field .row > * { flex: 1; min-width: 0; }
+    .color-swatches {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .color-swatch {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2px solid #fff;
+      box-shadow: 0 0 0 1px #cbd5e1;
+      cursor: pointer;
+      padding: 0;
+    }
+    .color-swatch.active {
+      box-shadow: 0 0 0 2px #2563eb;
     }
     .status-bar {
       position: absolute;
@@ -251,7 +301,13 @@
   <div class="app">
     <header>
       <h1>Network Diagram</h1>
-      <span class="hint" id="modeHint">Select mode — Shift/Cmd+click multi-select, drag to move</span>
+      <div class="zoom-controls">
+        <button type="button" id="btnZoomOut" title="Zoom out">−</button>
+        <span class="zoom-label" id="zoomLabel">100%</span>
+        <button type="button" id="btnZoomIn" title="Zoom in">+</button>
+        <button type="button" id="btnZoomReset" title="Reset zoom">⌂</button>
+      </div>
+      <span class="hint" id="modeHint">Select mode — drag palette items, wheel zoom, middle-drag pan</span>
     </header>
 
     <aside class="sidebar">
@@ -270,12 +326,14 @@
       </div>
     </aside>
 
-    <main class="canvas-wrap">
+    <main class="canvas-wrap" id="canvasWrap">
       <svg id="canvas" xmlns="http://www.w3.org/2000/svg">
         <defs id="iconDefs"></defs>
-        <g id="flamesLayer"></g>
-        <g id="linksLayer"></g>
-        <g id="nodesLayer"></g>
+        <g id="world">
+          <g id="flamesLayer"></g>
+          <g id="linksLayer"></g>
+          <g id="nodesLayer"></g>
+        </g>
       </svg>
       <div class="status-bar" id="statusBar"></div>
     </main>
@@ -294,8 +352,21 @@
       { type: "router", label: "Router" },
       { type: "switch", label: "Switch" },
       { type: "loadbalancer", label: "Load Balancer" },
+      { type: "firewall", label: "Firewall" },
       { type: "textbox", label: "Textbox" },
-      { type: "flame", label: "Flame" },
+      { type: "table", label: "Table" },
+      { type: "flame", label: "Frame" },
+    ];
+
+    const FRAME_COLORS = [
+      { id: "orange", stroke: "#f97316", fill: "rgba(255, 237, 213, 0.55)", title: "#c2410c", titleBg: "rgba(255, 247, 237, 0.9)" },
+      { id: "blue", stroke: "#3b82f6", fill: "rgba(219, 234, 254, 0.55)", title: "#1d4ed8", titleBg: "rgba(239, 246, 255, 0.9)" },
+      { id: "green", stroke: "#22c55e", fill: "rgba(220, 252, 231, 0.55)", title: "#15803d", titleBg: "rgba(240, 253, 244, 0.9)" },
+      { id: "purple", stroke: "#a855f7", fill: "rgba(243, 232, 255, 0.55)", title: "#7e22ce", titleBg: "rgba(250, 245, 255, 0.9)" },
+      { id: "red", stroke: "#ef4444", fill: "rgba(254, 226, 226, 0.55)", title: "#b91c1c", titleBg: "rgba(254, 242, 242, 0.9)" },
+      { id: "slate", stroke: "#64748b", fill: "rgba(241, 245, 249, 0.7)", title: "#334155", titleBg: "rgba(248, 250, 252, 0.95)" },
+      { id: "teal", stroke: "#14b8a6", fill: "rgba(204, 251, 241, 0.55)", title: "#0f766e", titleBg: "rgba(240, 253, 250, 0.9)" },
+      { id: "amber", stroke: "#d97706", fill: "rgba(254, 243, 199, 0.55)", title: "#b45309", titleBg: "rgba(255, 251, 235, 0.9)" },
     ];
 
     const NODE_W = 88;
@@ -311,6 +382,13 @@
     const FLAME_MIN_H = 140;
     const FLAME_PAD = 24;
     const FLAME_TITLE_H = 22;
+    const TABLE_CELL_W = 72;
+    const TABLE_CELL_H = 28;
+    const TABLE_PAD = 8;
+    const TABLE_MIN_DIM = 1;
+    const TABLE_MAX_DIM = 20;
+    const VIEW_MIN = 0.25;
+    const VIEW_MAX = 3;
 
     const measureCtx = document.createElement("canvas").getContext("2d");
 
@@ -323,16 +401,22 @@
       placeType: null,
       connectFrom: null,
       drag: null,
+      pan: null,
+      spaceDown: false,
       nextId: 1,
+      view: { x: 0, y: 0, scale: 1 },
     };
 
     const canvas = document.getElementById("canvas");
+    const canvasWrap = document.getElementById("canvasWrap");
+    const world = document.getElementById("world");
     const flamesLayer = document.getElementById("flamesLayer");
     const nodesLayer = document.getElementById("nodesLayer");
     const linksLayer = document.getElementById("linksLayer");
     const propsBody = document.getElementById("propsBody");
     const modeHint = document.getElementById("modeHint");
     const statusBar = document.getElementById("statusBar");
+    const zoomLabel = document.getElementById("zoomLabel");
 
     function uid() {
       return "n" + state.nextId++;
@@ -351,6 +435,7 @@
       state.connectFrom = null;
       canvas.classList.toggle("mode-place", mode === "place");
       canvas.classList.toggle("mode-connect", mode === "connect");
+      updateCursor();
 
       document.querySelectorAll(".palette-btn").forEach((b) => {
         b.classList.toggle("active", mode === "place" && b.dataset.type === placeType);
@@ -359,9 +444,15 @@
         b.classList.toggle("active", b.dataset.tool === mode);
       });
 
-      if (mode === "select") modeHint.textContent = "Select mode — Shift/Cmd+click multi-select, drag to move";
-      else if (mode === "place") modeHint.textContent = `Place ${labelFor(placeType)} — click on canvas`;
+      if (mode === "select") modeHint.textContent = "Select mode — drag palette items, wheel zoom, middle-drag / Space+drag pan";
+      else if (mode === "place") modeHint.textContent = `Place ${labelFor(placeType)} — click or drop on canvas`;
       else if (mode === "connect") modeHint.textContent = "Connect mode — click first device, then second";
+    }
+
+    function updateCursor() {
+      const panning = !!state.pan || state.spaceDown;
+      canvas.classList.toggle("mode-pan", panning && state.mode === "select");
+      canvas.classList.toggle("panning", !!state.pan);
     }
 
     function labelFor(type) {
@@ -376,8 +467,47 @@
       return node && node.type === "flame";
     }
 
+    function isTable(node) {
+      return node && node.type === "table";
+    }
+
     function isConnectable(node) {
       return node && node.type !== "flame";
+    }
+
+    function frameColor(node) {
+      const id = (node && node.color) || "orange";
+      return FRAME_COLORS.find((c) => c.id === id) || FRAME_COLORS[0];
+    }
+
+    function clampTableDim(n, fallback) {
+      const v = Number(n);
+      if (!Number.isFinite(v)) return fallback;
+      return Math.max(TABLE_MIN_DIM, Math.min(TABLE_MAX_DIM, Math.round(v)));
+    }
+
+    function makeEmptyCells(rows, cols) {
+      return Array.from({ length: rows }, () => Array.from({ length: cols }, () => ""));
+    }
+
+    function normalizeCells(cells, rows, cols) {
+      const out = makeEmptyCells(rows, cols);
+      if (!Array.isArray(cells)) return out;
+      for (let r = 0; r < rows; r++) {
+        const row = Array.isArray(cells[r]) ? cells[r] : [];
+        for (let c = 0; c < cols; c++) {
+          out[r][c] = row[c] != null ? String(row[c]) : "";
+        }
+      }
+      return out;
+    }
+
+    function measureTable(node) {
+      const rows = clampTableDim(node.rows, 3);
+      const cols = clampTableDim(node.cols, 3);
+      const w = Math.max(NODE_W, cols * TABLE_CELL_W + TABLE_PAD * 2);
+      const h = Math.max(NODE_H, rows * TABLE_CELL_H + TABLE_PAD * 2 + 18);
+      return { w, h, rows, cols };
     }
 
     function wrapTextLines(text, maxInnerW) {
@@ -429,6 +559,10 @@
           w: node.w != null ? node.w : FLAME_MIN_W,
           h: node.h != null ? node.h : FLAME_MIN_H,
         };
+      }
+      if (node.type === "table") {
+        const m = measureTable(node);
+        return { w: m.w, h: m.h };
       }
       return { w: NODE_W, h: NODE_H };
     }
@@ -484,7 +618,6 @@
       return w * h;
     }
 
-    /** Assign each content node to the smallest flame containing its center. */
     function membershipMap() {
       const map = new Map();
       const flames = flameNodes();
@@ -509,8 +642,6 @@
     }
 
     function layoutFlames() {
-      // Use current geometry for membership, then resize each flame to fit members.
-      // Iterate twice so nested/overlapping cases settle.
       for (let pass = 0; pass < 2; pass++) {
         const membership = membershipMap();
         for (const flame of flameNodes()) {
@@ -534,16 +665,6 @@
           flame.y = minY - FLAME_PAD - FLAME_TITLE_H;
           flame.w = Math.max(FLAME_MIN_W, maxX - minX + FLAME_PAD * 2);
           flame.h = Math.max(FLAME_MIN_H, maxY - minY + FLAME_PAD * 2 + FLAME_TITLE_H);
-          if (flame.x < 0) {
-            flame.w += flame.x;
-            flame.x = 0;
-            flame.w = Math.max(FLAME_MIN_W, flame.w);
-          }
-          if (flame.y < 0) {
-            flame.h += flame.y;
-            flame.y = 0;
-            flame.h = Math.max(FLAME_MIN_H, flame.h);
-          }
         }
       }
     }
@@ -552,7 +673,6 @@
       const ids = new Set(
         state.selectedNodes.has(primaryId) ? [...state.selectedNodes] : [primaryId]
       );
-      // If a flame is in the drag set, include its current members
       const membership = membershipMap();
       for (const id of [...ids]) {
         const n = findNode(id);
@@ -562,6 +682,38 @@
         }
       }
       return [...ids];
+    }
+
+    // --- View / pan / zoom ---
+    function applyView() {
+      world.setAttribute(
+        "transform",
+        `translate(${state.view.x},${state.view.y}) scale(${state.view.scale})`
+      );
+      const size = 20 * state.view.scale;
+      canvasWrap.style.backgroundSize = `${size}px ${size}px`;
+      canvasWrap.style.backgroundPosition = `${state.view.x}px ${state.view.y}px`;
+      zoomLabel.textContent = Math.round(state.view.scale * 100) + "%";
+    }
+
+    function zoomAt(screenX, screenY, newScale) {
+      const old = state.view.scale;
+      const scale = Math.min(VIEW_MAX, Math.max(VIEW_MIN, newScale));
+      if (scale === old) return;
+      state.view.x = screenX - ((screenX - state.view.x) * scale) / old;
+      state.view.y = screenY - ((screenY - state.view.y) * scale) / old;
+      state.view.scale = scale;
+      applyView();
+    }
+
+    function zoomBy(factor) {
+      const rect = canvas.getBoundingClientRect();
+      zoomAt(rect.width / 2, rect.height / 2, state.view.scale * factor);
+    }
+
+    function resetView() {
+      state.view = { x: 0, y: 0, scale: 1 };
+      applyView();
     }
 
     // --- Icons ---
@@ -616,10 +768,40 @@
           <rect x="4" y="30" width="16" height="10" rx="2" fill="#5eead4" stroke="#0f766e" stroke-width="1.5"/>
           <rect x="28" y="30" width="16" height="10" rx="2" fill="#5eead4" stroke="#0f766e" stroke-width="1.5"/>
         </symbol>
+        <symbol id="icon-firewall" viewBox="0 0 48 48">
+          <rect x="8" y="8" width="32" height="32" rx="3" fill="#dc2626" stroke="#991b1b" stroke-width="1.5"/>
+          <rect x="8" y="14" width="32" height="4" fill="#7f1d1d"/>
+          <rect x="8" y="24" width="32" height="4" fill="#7f1d1d"/>
+          <rect x="8" y="34" width="32" height="4" fill="#7f1d1d"/>
+          <rect x="12" y="8" width="4" height="32" fill="#b91c1c"/>
+          <rect x="24" y="8" width="4" height="32" fill="#b91c1c"/>
+          <rect x="36" y="8" width="4" height="32" fill="#b91c1c"/>
+          <path d="M24 16l6 4v6c0 4-2.5 7-6 8-3.5-1-6-4-6-8v-6l6-4z" fill="#fef2f2" stroke="#991b1b" stroke-width="1"/>
+        </symbol>
+        <symbol id="icon-table" viewBox="0 0 48 48">
+          <rect x="6" y="8" width="36" height="32" rx="2" fill="#fff" stroke="#475569" stroke-width="1.5"/>
+          <line x1="6" y1="18" x2="42" y2="18" stroke="#94a3b8" stroke-width="1.2"/>
+          <line x1="6" y1="28" x2="42" y2="28" stroke="#94a3b8" stroke-width="1.2"/>
+          <line x1="18" y1="8" x2="18" y2="40" stroke="#94a3b8" stroke-width="1.2"/>
+          <line x1="30" y1="8" x2="30" y2="40" stroke="#94a3b8" stroke-width="1.2"/>
+          <rect x="6" y="8" width="36" height="10" fill="#e2e8f0"/>
+        </symbol>
         <symbol id="icon-flame" viewBox="0 0 48 48">
           <rect x="6" y="10" width="36" height="28" rx="4" fill="#ffedd5" stroke="#f97316" stroke-width="1.5" stroke-dasharray="4 2"/>
-          <text x="24" y="27" text-anchor="middle" font-size="9" fill="#c2410c" font-family="sans-serif" font-weight="600">Zone</text>
+          <text x="24" y="27" text-anchor="middle" font-size="9" fill="#c2410c" font-family="sans-serif" font-weight="600">Frame</text>
         </symbol>
+        <marker id="arrow-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+        </marker>
+        <marker id="arrow-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto" markerUnits="strokeWidth">
+          <path d="M10,0 L0,5 L10,10 z" fill="#475569"/>
+        </marker>
+        <marker id="arrow-end-sel" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/>
+        </marker>
+        <marker id="arrow-start-sel" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto" markerUnits="strokeWidth">
+          <path d="M10,0 L0,5 L10,10 z" fill="#2563eb"/>
+        </marker>
       `;
     }
 
@@ -632,7 +814,7 @@
         } else {
           icon = `<svg viewBox="0 0 48 48"><use href="#icon-${d.type}"/></svg>`;
         }
-        return `<button type="button" class="palette-btn" data-type="${d.type}">
+        return `<button type="button" class="palette-btn" data-type="${d.type}" draggable="true">
           <span class="icon-wrap">${icon}</span>
           <span>${d.label}</span>
         </button>`;
@@ -640,7 +822,65 @@
 
       palette.querySelectorAll(".palette-btn").forEach((btn) => {
         btn.addEventListener("click", () => setMode("place", btn.dataset.type));
+        btn.addEventListener("dragstart", (e) => {
+          e.dataTransfer.setData("application/x-network-node", btn.dataset.type);
+          e.dataTransfer.setData("text/plain", btn.dataset.type);
+          e.dataTransfer.effectAllowed = "copy";
+        });
       });
+    }
+
+    function promptTableSize() {
+      const raw = prompt("Table size (rows x cols):", "3x3");
+      if (raw == null) return null;
+      const m = String(raw).trim().match(/^(\d+)\s*[xX,]\s*(\d+)$/) || String(raw).trim().match(/^(\d+)\s+(\d+)$/);
+      if (!m) {
+        showStatus("Invalid size — use e.g. 3x4");
+        return null;
+      }
+      return {
+        rows: clampTableDim(m[1], 3),
+        cols: clampTableDim(m[2], 3),
+      };
+    }
+
+    function createNodeAt(type, worldX, worldY) {
+      let label = labelFor(type);
+      if (type === "textbox") label = "Text";
+      if (type === "flame") label = "Frame";
+      if (type === "table") label = "Table";
+
+      let rows = 3;
+      let cols = 3;
+      if (type === "table") {
+        const size = promptTableSize();
+        if (!size) return null;
+        rows = size.rows;
+        cols = size.cols;
+      }
+
+      const temp = { type, label, rows, cols, w: FLAME_MIN_W, h: FLAME_MIN_H };
+      const { w, h } = nodeSize(temp);
+      const node = {
+        id: uid(),
+        type,
+        x: worldX - w / 2,
+        y: worldY - h / 2,
+        label,
+        description: "",
+      };
+      if (type === "flame") {
+        node.w = FLAME_MIN_W;
+        node.h = FLAME_MIN_H;
+        node.color = "orange";
+      }
+      if (type === "table") {
+        node.rows = rows;
+        node.cols = cols;
+        node.cells = makeEmptyCells(rows, cols);
+      }
+      state.nodes.push(node);
+      return node;
     }
 
     // --- Render ---
@@ -662,6 +902,7 @@
       flamesLayer.innerHTML = "";
       for (const node of flameNodes()) {
         const { w, h } = nodeSize(node);
+        const colors = frameColor(node);
         const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
         g.setAttribute(
           "class",
@@ -675,8 +916,8 @@
         body.setAttribute("width", w);
         body.setAttribute("height", h);
         body.setAttribute("rx", 10);
-        body.setAttribute("fill", "rgba(255, 237, 213, 0.55)");
-        body.setAttribute("stroke", "#f97316");
+        body.setAttribute("fill", colors.fill);
+        body.setAttribute("stroke", colors.stroke);
         body.setAttribute("stroke-width", 2);
         body.setAttribute("stroke-dasharray", "8 4");
         g.appendChild(body);
@@ -687,7 +928,7 @@
         titleBg.setAttribute("width", Math.max(40, Math.min(w - 16, 160)));
         titleBg.setAttribute("height", 18);
         titleBg.setAttribute("rx", 4);
-        titleBg.setAttribute("fill", "rgba(255, 247, 237, 0.9)");
+        titleBg.setAttribute("fill", colors.titleBg);
         g.appendChild(titleBg);
 
         const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
@@ -696,8 +937,8 @@
         text.setAttribute("font-size", "12");
         text.setAttribute("font-family", "sans-serif");
         text.setAttribute("font-weight", "600");
-        text.setAttribute("fill", "#c2410c");
-        text.textContent = truncate(node.label || "Flame", 22);
+        text.setAttribute("fill", colors.title);
+        text.textContent = truncate(node.label || "Frame", 22);
         g.appendChild(text);
 
         if (node.description) {
@@ -714,6 +955,28 @@
       }
     }
 
+    /** Point on node rectangle edge in the direction of (towardX, towardY). */
+    function boundaryPoint(node, towardX, towardY, outward = 0) {
+      const b = nodeBounds(node);
+      const cx = b.x + b.w / 2;
+      const cy = b.y + b.h / 2;
+      const dx = towardX - cx;
+      const dy = towardY - cy;
+      if (dx === 0 && dy === 0) return { x: cx, y: cy };
+      const hw = b.w / 2;
+      const hh = b.h / 2;
+      const sx = Math.abs(dx) / (hw || 1);
+      const sy = Math.abs(dy) / (hh || 1);
+      const s = Math.max(sx, sy) || 1;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len;
+      const uy = dy / len;
+      return {
+        x: cx + dx / s + ux * outward,
+        y: cy + dy / s + uy * outward,
+      };
+    }
+
     function renderLinks() {
       linksLayer.innerHTML = "";
       for (const link of state.links) {
@@ -722,22 +985,36 @@
         if (!a || !b || isFlame(a) || isFlame(b)) continue;
         const ca = nodeCenter(a);
         const cb = nodeCenter(b);
+        const selected = state.selectedLinks.has(link.id);
+        const lineStyle = link.lineStyle === "dotted" ? "dotted" : "solid";
+        const arrow = link.arrow === "end" || link.arrow === "both" ? link.arrow : "none";
+        // Stop at box edges (slight outward offset keeps arrow tip outside the stroke)
+        const p1 = boundaryPoint(a, cb.x, cb.y, 1.5);
+        const p2 = boundaryPoint(b, ca.x, ca.y, 1.5);
+
         const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
         g.dataset.id = link.id;
 
         const hit = document.createElementNS("http://www.w3.org/2000/svg", "line");
-        hit.setAttribute("x1", ca.x);
-        hit.setAttribute("y1", ca.y);
-        hit.setAttribute("x2", cb.x);
-        hit.setAttribute("y2", cb.y);
+        hit.setAttribute("x1", p1.x);
+        hit.setAttribute("y1", p1.y);
+        hit.setAttribute("x2", p2.x);
+        hit.setAttribute("y2", p2.y);
         hit.setAttribute("class", "link-hit");
 
         const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-        line.setAttribute("x1", ca.x);
-        line.setAttribute("y1", ca.y);
-        line.setAttribute("x2", cb.x);
-        line.setAttribute("y2", cb.y);
-        line.setAttribute("class", "link-line" + (state.selectedLinks.has(link.id) ? " selected" : ""));
+        line.setAttribute("x1", p1.x);
+        line.setAttribute("y1", p1.y);
+        line.setAttribute("x2", p2.x);
+        line.setAttribute("y2", p2.y);
+        line.setAttribute("class", "link-line" + (selected ? " selected" : ""));
+        if (lineStyle === "dotted") line.setAttribute("stroke-dasharray", "6 4");
+        if (arrow === "end" || arrow === "both") {
+          line.setAttribute("marker-end", selected ? "url(#arrow-end-sel)" : "url(#arrow-end)");
+        }
+        if (arrow === "both") {
+          line.setAttribute("marker-start", selected ? "url(#arrow-start-sel)" : "url(#arrow-start)");
+        }
 
         g.appendChild(hit);
         g.appendChild(line);
@@ -758,6 +1035,65 @@
     function truncate(str, n) {
       if (!str) return "";
       return str.length > n ? str.slice(0, n - 1) + "…" : str;
+    }
+
+    function renderTableNode(g, node, w, h) {
+      const rows = clampTableDim(node.rows, 3);
+      const cols = clampTableDim(node.cols, 3);
+      const cells = normalizeCells(node.cells, rows, cols);
+      const headerH = 18;
+      const gridW = w - TABLE_PAD * 2;
+      const gridH = h - TABLE_PAD * 2 - headerH;
+      const cellW = gridW / cols;
+      const cellH = gridH / rows;
+
+      const body = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      body.setAttribute("class", "node-body");
+      body.setAttribute("width", w);
+      body.setAttribute("height", h);
+      body.setAttribute("rx", 6);
+      body.setAttribute("fill", "#ffffff");
+      body.setAttribute("stroke", "#475569");
+      body.setAttribute("stroke-width", 1.5);
+      g.appendChild(body);
+
+      const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      title.setAttribute("x", TABLE_PAD);
+      title.setAttribute("y", 14);
+      title.setAttribute("font-size", "11");
+      title.setAttribute("font-family", "sans-serif");
+      title.setAttribute("font-weight", "600");
+      title.setAttribute("fill", "#334155");
+      title.textContent = truncate(node.label || "Table", 18);
+      g.appendChild(title);
+
+      const gx = TABLE_PAD;
+      const gy = TABLE_PAD + headerH;
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const x = gx + c * cellW;
+          const y = gy + r * cellH;
+          const cell = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          cell.setAttribute("x", x);
+          cell.setAttribute("y", y);
+          cell.setAttribute("width", cellW);
+          cell.setAttribute("height", cellH);
+          cell.setAttribute("fill", r === 0 ? "#f1f5f9" : "#fff");
+          cell.setAttribute("stroke", "#94a3b8");
+          cell.setAttribute("stroke-width", 1);
+          g.appendChild(cell);
+
+          const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          t.setAttribute("x", x + cellW / 2);
+          t.setAttribute("y", y + cellH / 2 + 4);
+          t.setAttribute("text-anchor", "middle");
+          t.setAttribute("font-size", "10");
+          t.setAttribute("font-family", "sans-serif");
+          t.setAttribute("fill", "#334155");
+          t.textContent = truncate(cells[r][c] || "", Math.max(4, Math.floor(cellW / 7)));
+          g.appendChild(t);
+        }
+      }
     }
 
     function renderNodes() {
@@ -796,6 +1132,8 @@
             text.appendChild(tspan);
           });
           g.appendChild(text);
+        } else if (node.type === "table") {
+          renderTableNode(g, node, w, h);
         } else {
           const hit = document.createElementNS("http://www.w3.org/2000/svg", "rect");
           hit.setAttribute("class", "node-hit");
@@ -851,13 +1189,29 @@
       }
     }
 
+    function cellsToText(cells) {
+      return (cells || []).map((row) => (row || []).join(";")).join("\n");
+    }
+
+    function textToCells(text, rows, cols) {
+      const lines = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+      const out = makeEmptyCells(rows, cols);
+      for (let r = 0; r < rows; r++) {
+        const parts = (lines[r] || "").split(";");
+        for (let c = 0; c < cols; c++) {
+          out[r][c] = parts[c] != null ? parts[c] : "";
+        }
+      }
+      return out;
+    }
+
     function renderProps() {
       const nCount = state.selectedNodes.size;
       const lCount = state.selectedLinks.size;
 
       if (nCount === 0 && lCount === 0) {
         propsBody.className = "props-body empty";
-        propsBody.textContent = "Select a device or textbox";
+        propsBody.textContent = "Select a device, frame, table, or link";
         return;
       }
 
@@ -889,7 +1243,9 @@
         }
         const isText = node.type === "textbox";
         const flame = isFlame(node);
+        const table = isTable(node);
         const memberCount = flame ? (membershipMap().get(node.id) || []).length : 0;
+        const color = frameColor(node);
         propsBody.className = "props-body";
         propsBody.innerHTML = `
           <div class="field">
@@ -898,7 +1254,31 @@
           </div>
           ${
             flame
-              ? `<div class="field"><label>Members</label><div class="meta">${memberCount} device${memberCount === 1 ? "" : "s"} inside</div></div>`
+              ? `<div class="field"><label>Members</label><div class="meta">${memberCount} device${memberCount === 1 ? "" : "s"} inside</div></div>
+                 <div class="field">
+                   <label>Color</label>
+                   <div class="color-swatches" id="frameColors">
+                     ${FRAME_COLORS.map((c) =>
+                       `<button type="button" class="color-swatch${c.id === color.id ? " active" : ""}" data-color="${c.id}" style="background:${c.stroke}" title="${c.id}"></button>`
+                     ).join("")}
+                   </div>
+                 </div>`
+              : ""
+          }
+          ${
+            table
+              ? `<div class="field">
+                   <label>Size</label>
+                   <div class="row">
+                     <input type="number" id="propRows" min="${TABLE_MIN_DIM}" max="${TABLE_MAX_DIM}" value="${clampTableDim(node.rows, 3)}" />
+                     <input type="number" id="propCols" min="${TABLE_MIN_DIM}" max="${TABLE_MAX_DIM}" value="${clampTableDim(node.cols, 3)}" />
+                   </div>
+                   <div class="meta">Rows × columns</div>
+                 </div>
+                 <div class="field">
+                   <label>Cells (; separated)</label>
+                   <textarea id="propCells" class="cells-area" placeholder="A1;B1&#10;A2;B2">${escapeHtml(cellsToText(normalizeCells(node.cells, clampTableDim(node.rows, 3), clampTableDim(node.cols, 3))))}</textarea>
+                 </div>`
               : ""
           }
           <div class="field">
@@ -924,6 +1304,38 @@
           node.description = descEl.value;
           renderVisualOnly();
         });
+        if (flame) {
+          document.getElementById("frameColors").addEventListener("click", (e) => {
+            const btn = e.target.closest(".color-swatch");
+            if (!btn) return;
+            node.color = btn.dataset.color;
+            render();
+          });
+        }
+        if (table) {
+          const rowsEl = document.getElementById("propRows");
+          const colsEl = document.getElementById("propCols");
+          const cellsEl = document.getElementById("propCells");
+          const resizeTable = () => {
+            const rows = clampTableDim(rowsEl.value, 3);
+            const cols = clampTableDim(colsEl.value, 3);
+            rowsEl.value = rows;
+            colsEl.value = cols;
+            node.rows = rows;
+            node.cols = cols;
+            node.cells = normalizeCells(textToCells(cellsEl.value, rows, cols), rows, cols);
+            cellsEl.value = cellsToText(node.cells);
+            renderVisualOnly();
+          };
+          rowsEl.addEventListener("change", resizeTable);
+          colsEl.addEventListener("change", resizeTable);
+          cellsEl.addEventListener("input", () => {
+            const rows = clampTableDim(node.rows, 3);
+            const cols = clampTableDim(node.cols, 3);
+            node.cells = textToCells(cellsEl.value, rows, cols);
+            renderVisualOnly();
+          });
+        }
         return;
       }
 
@@ -937,6 +1349,8 @@
         }
         const a = findNode(link.from);
         const b = findNode(link.to);
+        const lineStyle = link.lineStyle === "dotted" ? "dotted" : "solid";
+        const arrow = link.arrow === "end" || link.arrow === "both" ? link.arrow : "none";
         propsBody.className = "props-body";
         propsBody.innerHTML = `
           <div class="field">
@@ -944,10 +1358,34 @@
             <div class="meta">${escapeHtml(a?.label || labelFor(a?.type))} → ${escapeHtml(b?.label || labelFor(b?.type))}</div>
           </div>
           <div class="field">
+            <label>Line style</label>
+            <select id="propLineStyle">
+              <option value="solid"${lineStyle === "solid" ? " selected" : ""}>Solid</option>
+              <option value="dotted"${lineStyle === "dotted" ? " selected" : ""}>Dotted</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Arrow</label>
+            <select id="propArrow">
+              <option value="none"${arrow === "none" ? " selected" : ""}>None</option>
+              <option value="end"${arrow === "end" ? " selected" : ""}>End arrow</option>
+              <option value="both"${arrow === "both" ? " selected" : ""}>Both ends</option>
+            </select>
+          </div>
+          <div class="field">
             <label>Hint</label>
             <div class="meta">Press Delete to remove this link</div>
           </div>
         `;
+        document.getElementById("propLineStyle").addEventListener("change", (e) => {
+          link.lineStyle = e.target.value === "dotted" ? "dotted" : "solid";
+          renderVisualOnly();
+        });
+        document.getElementById("propArrow").addEventListener("change", (e) => {
+          const v = e.target.value;
+          link.arrow = v === "end" || v === "both" ? v : "none";
+          renderVisualOnly();
+        });
       }
     }
 
@@ -990,20 +1428,30 @@
 
     // --- Interaction ---
     function svgPoint(e) {
-      const pt = canvas.createSVGPoint();
-      pt.x = e.clientX;
-      pt.y = e.clientY;
-      const ctm = canvas.getScreenCTM().inverse();
-      return pt.matrixTransform(ctm);
+      const rect = canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      return {
+        x: (sx - state.view.x) / state.view.scale,
+        y: (sy - state.view.y) / state.view.scale,
+        sx,
+        sy,
+      };
     }
 
     function onNodeMouseDown(e, node) {
       e.stopPropagation();
       e.preventDefault();
 
+      if (e.button === 1 || (e.button === 0 && state.spaceDown)) {
+        startPan(e);
+        return;
+      }
+      if (e.button !== 0) return;
+
       if (state.mode === "connect") {
         if (!isConnectable(node)) {
-          showStatus("Cannot connect a Flame");
+          showStatus("Cannot connect a Frame");
           return;
         }
         if (!state.connectFrom) {
@@ -1020,7 +1468,13 @@
               (l.from === node.id && l.to === state.connectFrom)
           );
           if (!exists) {
-            state.links.push({ id: uid(), from: state.connectFrom, to: node.id });
+            state.links.push({
+              id: uid(),
+              from: state.connectFrom,
+              to: node.id,
+              lineStyle: "solid",
+              arrow: "none",
+            });
             showStatus("Connected");
           } else {
             showStatus("Already connected");
@@ -1063,33 +1517,34 @@
       };
     }
 
+    function startPan(e) {
+      const p = svgPoint(e);
+      state.pan = {
+        startSx: p.sx,
+        startSy: p.sy,
+        originX: state.view.x,
+        originY: state.view.y,
+      };
+      updateCursor();
+    }
+
     canvas.addEventListener("mousedown", (e) => {
+      if (e.button === 1 || (e.button === 0 && state.spaceDown)) {
+        e.preventDefault();
+        startPan(e);
+        return;
+      }
+      if (e.button !== 0) return;
+
       if (e.target !== canvas && e.target.closest(".node-group, .flame-group, .link-hit, .link-line")) return;
 
       if (state.mode === "place" && state.placeType) {
         const p = svgPoint(e);
-        const type = state.placeType;
-        let label = labelFor(type);
-        if (type === "textbox") label = "Text";
-        if (type === "flame") label = "Flame";
-        const temp = { type, label, w: FLAME_MIN_W, h: FLAME_MIN_H };
-        const { w, h } = nodeSize(temp);
-        const node = {
-          id: uid(),
-          type,
-          x: Math.max(0, p.x - w / 2),
-          y: Math.max(0, p.y - h / 2),
-          label,
-          description: "",
-        };
-        if (type === "flame") {
-          node.w = FLAME_MIN_W;
-          node.h = FLAME_MIN_H;
-        }
-        state.nodes.push(node);
+        const node = createNodeAt(state.placeType, p.x, p.y);
+        if (!node) return;
         selectNode(node.id, false);
         setMode("select");
-        showStatus(`Added ${labelFor(type)}`);
+        showStatus(`Added ${labelFor(node.type)}`);
         return;
       }
 
@@ -1100,10 +1555,56 @@
         return;
       }
 
+      // Empty canvas drag pans in select mode
+      if (state.mode === "select") {
+        startPan(e);
+        clearSelection();
+        return;
+      }
+
       clearSelection();
     });
 
+    canvas.addEventListener(
+      "wheel",
+      (e) => {
+        e.preventDefault();
+        const p = svgPoint(e);
+        const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+        zoomAt(p.sx, p.sy, state.view.scale * factor);
+      },
+      { passive: false }
+    );
+
+    canvas.addEventListener("dragover", (e) => {
+      if (e.dataTransfer.types.includes("application/x-network-node") || e.dataTransfer.types.includes("text/plain")) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      }
+    });
+
+    canvas.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const type =
+        e.dataTransfer.getData("application/x-network-node") ||
+        e.dataTransfer.getData("text/plain");
+      if (!type || !DEVICE_TYPES.some((d) => d.type === type)) return;
+      const p = svgPoint(e);
+      const node = createNodeAt(type, p.x, p.y);
+      if (!node) return;
+      selectNode(node.id, false);
+      setMode("select");
+      showStatus(`Added ${labelFor(node.type)}`);
+    });
+
     window.addEventListener("mousemove", (e) => {
+      if (state.pan) {
+        const p = svgPoint(e);
+        state.view.x = state.pan.originX + (p.sx - state.pan.startSx);
+        state.view.y = state.pan.originY + (p.sy - state.pan.startSy);
+        applyView();
+        return;
+      }
       if (!state.drag) return;
       const p = svgPoint(e);
       const dx = p.x - state.drag.startX;
@@ -1111,11 +1612,9 @@
       for (const [id, origin] of Object.entries(state.drag.origins)) {
         const node = findNode(id);
         if (!node) continue;
-        node.x = Math.max(0, origin.x + dx);
-        node.y = Math.max(0, origin.y + dy);
+        node.x = origin.x + dx;
+        node.y = origin.y + dy;
       }
-      // During drag of non-flame content, skip full layout to avoid fighting the user;
-      // still re-layout when only flames move with members (positions already synced).
       const draggingFlame = Object.keys(state.drag.origins).some((id) => isFlame(findNode(id)));
       if (draggingFlame) {
         renderVisualOnly();
@@ -1126,15 +1625,63 @@
     });
 
     window.addEventListener("mouseup", () => {
+      if (state.pan) {
+        state.pan = null;
+        updateCursor();
+      }
       if (state.drag) {
         state.drag = null;
         render();
       }
     });
 
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "Space" && !e.target.matches("input, textarea, select")) {
+        e.preventDefault();
+        state.spaceDown = true;
+        updateCursor();
+      }
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (e.target.matches("input, textarea, select")) return;
+        e.preventDefault();
+        deleteSelected();
+      }
+      if (e.key === "Escape") {
+        setMode("select");
+        clearSelection();
+      }
+      if ((e.key === "=" || e.key === "+") && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        zoomBy(1.1);
+      }
+      if ((e.key === "-" || e.key === "_") && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        zoomBy(1 / 1.1);
+      }
+      if (e.key === "0" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        resetView();
+      }
+    });
+
+    window.addEventListener("keyup", (e) => {
+      if (e.code === "Space") {
+        state.spaceDown = false;
+        updateCursor();
+      }
+    });
+
+    // Prevent middle-click autoscroll
+    canvas.addEventListener("auxclick", (e) => {
+      if (e.button === 1) e.preventDefault();
+    });
+
     document.getElementById("btnSelect").addEventListener("click", () => setMode("select"));
     document.getElementById("btnConnect").addEventListener("click", () => setMode("connect"));
     document.getElementById("btnDelete").addEventListener("click", deleteSelected);
+    document.getElementById("btnZoomIn").addEventListener("click", () => zoomBy(1.1));
+    document.getElementById("btnZoomOut").addEventListener("click", () => zoomBy(1 / 1.1));
+    document.getElementById("btnZoomReset").addEventListener("click", resetView);
 
     function deleteSelected() {
       if (!hasSelection()) {
@@ -1157,18 +1704,6 @@
       clearSelection();
       showStatus(`Deleted ${count} item${count > 1 ? "s" : ""}`);
     }
-
-    window.addEventListener("keydown", (e) => {
-      if (e.key === "Delete" || e.key === "Backspace") {
-        if (e.target.matches("input, textarea")) return;
-        e.preventDefault();
-        deleteSelected();
-      }
-      if (e.key === "Escape") {
-        setMode("select");
-        clearSelection();
-      }
-    });
 
     // --- Filename helper ---
     function askFilename(defaultBase, ext) {
@@ -1205,10 +1740,11 @@
         return;
       }
       const data = {
-        version: 1,
+        version: 2,
         nodes: state.nodes,
         links: state.links,
         nextId: state.nextId,
+        view: state.view,
       };
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       downloadBlob(blob, filename);
@@ -1239,13 +1775,25 @@
               if (n.type === "flame") {
                 node.w = typeof n.w === "number" ? n.w : FLAME_MIN_W;
                 node.h = typeof n.h === "number" ? n.h : FLAME_MIN_H;
+                node.color = FRAME_COLORS.some((c) => c.id === n.color) ? n.color : "orange";
+              }
+              if (n.type === "table") {
+                node.rows = clampTableDim(n.rows, 3);
+                node.cols = clampTableDim(n.cols, 3);
+                node.cells = normalizeCells(n.cells, node.rows, node.cols);
               }
               return node;
             });
           const nodeIds = new Set(nodes.map((n) => n.id));
           const links = data.links
             .filter((l) => l && l.id && nodeIds.has(l.from) && nodeIds.has(l.to))
-            .map((l) => ({ id: String(l.id), from: String(l.from), to: String(l.to) }));
+            .map((l) => ({
+              id: String(l.id),
+              from: String(l.from),
+              to: String(l.to),
+              lineStyle: l.lineStyle === "dotted" ? "dotted" : "solid",
+              arrow: l.arrow === "end" || l.arrow === "both" ? l.arrow : "none",
+            }));
 
           let nextId = Number(data.nextId) || 1;
           for (const n of nodes) {
@@ -1264,6 +1812,17 @@
           state.selectedLinks.clear();
           state.connectFrom = null;
           state.drag = null;
+          state.pan = null;
+          if (data.view && typeof data.view.scale === "number") {
+            state.view = {
+              x: Number(data.view.x) || 0,
+              y: Number(data.view.y) || 0,
+              scale: Math.min(VIEW_MAX, Math.max(VIEW_MIN, data.view.scale)),
+            };
+          } else {
+            state.view = { x: 0, y: 0, scale: 1 };
+          }
+          applyView();
           setMode("select");
           render();
           showStatus("Loaded diagram");
@@ -1284,6 +1843,9 @@
         minY = Math.min(minY, node.y);
         maxX = Math.max(maxX, node.x + w);
         maxY = Math.max(maxY, node.y + h);
+      }
+      if (!Number.isFinite(minX)) {
+        return { minX: 0, minY: 0, width: 200, height: 200 };
       }
       const pad = 40;
       minX -= pad;
@@ -1310,6 +1872,8 @@
       clone.setAttribute("height", height);
       clone.setAttribute("viewBox", `${minX} ${minY} ${width} ${height}`);
       clone.style.background = "#ffffff";
+      const worldClone = clone.querySelector("#world");
+      if (worldClone) worldClone.removeAttribute("transform");
 
       clone.querySelectorAll(".link-line").forEach((el) => {
         el.setAttribute("stroke", el.classList.contains("selected") ? "#2563eb" : "#475569");
@@ -1471,6 +2035,7 @@
     // Init
     buildIconDefs();
     buildPalette();
+    applyView();
     setMode("select");
     render();
   </script>
