@@ -7,6 +7,7 @@ Browser-based editor for drawing network topology diagrams. Single HTML file, no
 - Device palette: Server, Cloud, PC, Router, Switch, Load Balancer, Firewall, Textbox, Table, Frame
 - Drag-and-drop from the palette onto the canvas, or click-to-place
 - Connect devices; style links as solid/dotted with optional arrows
+- Drag a link’s midpoint handle to curve it; crossings draw circuit-style hop-over arcs
 - Colored Frame zones that auto-fit around devices inside them
 - Table object with flexible rows and columns
 - Pan and zoom the canvas (wheel, middle-drag, Space+drag, header controls)
@@ -38,7 +39,7 @@ python3 -m http.server 8080
 
 1. Drag a device from the left palette onto the canvas, or click a palette item then click the canvas.
 2. **Table**: when placing, enter size as `rows x cols` (e.g. `3x4`). Edit cells in the properties panel (semicolon-separated, e.g. `A1;B1`).
-3. Use **Connect** and click two devices to link them. Select a link to set solid/dotted style and arrows.
+3. Use **Connect** and click two devices to link them. Select a link to set solid/dotted style and arrows. Drag the blue handle to curve the link (double-click handle or **Straighten** to reset). When two links cross, a hop-over arc is drawn on one of them.
 4. Place a **Frame** to group devices; pick a color in the properties panel.
 5. **Pan**: middle-mouse drag, Space+drag, or drag empty canvas. **Zoom**: mouse wheel or header +/−.
 6. **Save JSON** / **Load JSON** to persist diagrams (includes view and styles).

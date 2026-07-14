@@ -206,6 +206,16 @@
       pointer-events: stroke;
       cursor: pointer;
     }
+    .link-handle {
+      fill: #fff;
+      stroke: #2563eb;
+      stroke-width: 2;
+      cursor: grab;
+      pointer-events: all;
+    }
+    .link-handle:active {
+      cursor: grabbing;
+    }
     .props {
       background: #f8fafc;
       border-left: 1px solid #cbd5e1;
@@ -261,6 +271,17 @@
       gap: 8px;
     }
     .field .row > * { flex: 1; min-width: 0; }
+    .field button {
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      color: #1e293b;
+    }
+    .field button:hover { background: #f1f5f9; }
     .color-swatches {
       display: flex;
       flex-wrap: wrap;
@@ -401,6 +422,7 @@
       placeType: null,
       connectFrom: null,
       drag: null,
+      curveDrag: null,
       pan: null,
       spaceDown: false,
       nextId: 1,
@@ -977,36 +999,284 @@
       };
     }
 
-    function renderLinks() {
-      linksLayer.innerHTML = "";
-      for (const link of state.links) {
-        const a = findNode(link.from);
-        const b = findNode(link.to);
-        if (!a || !b || isFlame(a) || isFlame(b)) continue;
+    const HOP_R = 7;
+    const HOP_SKIP = 10;
+    const CURVE_SAMPLES = 16;
+
+    function normalizeCurve(c) {
+      if (!c || typeof c.x !== "number" || typeof c.y !== "number") return null;
+      if (!Number.isFinite(c.x) || !Number.isFinite(c.y)) return null;
+      return { x: c.x, y: c.y };
+    }
+
+    function linkEndpoints(link) {
+      const a = findNode(link.from);
+      const b = findNode(link.to);
+      if (!a || !b || isFlame(a) || isFlame(b)) return null;
+      const curve = normalizeCurve(link.curve);
+      let p1, p2;
+      if (curve) {
+        p1 = boundaryPoint(a, curve.x, curve.y, 1.5);
+        p2 = boundaryPoint(b, curve.x, curve.y, 1.5);
+      } else {
         const ca = nodeCenter(a);
         const cb = nodeCenter(b);
+        p1 = boundaryPoint(a, cb.x, cb.y, 1.5);
+        p2 = boundaryPoint(b, ca.x, ca.y, 1.5);
+      }
+      return { p1, p2, curve };
+    }
+
+    function quadPoint(p1, c, p2, t) {
+      const u = 1 - t;
+      return {
+        x: u * u * p1.x + 2 * u * t * c.x + t * t * p2.x,
+        y: u * u * p1.y + 2 * u * t * c.y + t * t * p2.y,
+      };
+    }
+
+    function midHandlePoint(p1, p2, curve) {
+      if (curve) return quadPoint(p1, curve, p2, 0.5);
+      return { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+    }
+
+    /** Control point so the curve passes through handle at t=0.5 */
+    function curveFromHandle(p1, p2, handle) {
+      return {
+        x: 2 * handle.x - 0.5 * p1.x - 0.5 * p2.x,
+        y: 2 * handle.y - 0.5 * p1.y - 0.5 * p2.y,
+      };
+    }
+
+    function sampleLink(p1, p2, curve, n = CURVE_SAMPLES) {
+      const pts = [];
+      if (curve) {
+        for (let i = 0; i <= n; i++) pts.push(quadPoint(p1, curve, p2, i / n));
+      } else {
+        pts.push({ x: p1.x, y: p1.y }, { x: p2.x, y: p2.y });
+      }
+      return pts;
+    }
+
+    function polylineLen(pts) {
+      let len = 0;
+      for (let i = 1; i < pts.length; i++) {
+        len += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+      }
+      return len;
+    }
+
+    function pointAtDistance(pts, dist) {
+      if (pts.length < 2) return { x: pts[0]?.x || 0, y: pts[0]?.y || 0, tx: 1, ty: 0 };
+      let rem = Math.max(0, dist);
+      for (let i = 1; i < pts.length; i++) {
+        const dx = pts[i].x - pts[i - 1].x;
+        const dy = pts[i].y - pts[i - 1].y;
+        const seg = Math.hypot(dx, dy) || 1e-9;
+        if (rem <= seg) {
+          const t = rem / seg;
+          const len = Math.hypot(dx, dy) || 1;
+          return {
+            x: pts[i - 1].x + dx * t,
+            y: pts[i - 1].y + dy * t,
+            tx: dx / len,
+            ty: dy / len,
+          };
+        }
+        rem -= seg;
+      }
+      const last = pts[pts.length - 1];
+      const prev = pts[pts.length - 2];
+      const dx = last.x - prev.x;
+      const dy = last.y - prev.y;
+      const len = Math.hypot(dx, dy) || 1;
+      return { x: last.x, y: last.y, tx: dx / len, ty: dy / len };
+    }
+
+    function segmentsIntersect(a1, a2, b1, b2) {
+      const dax = a2.x - a1.x;
+      const day = a2.y - a1.y;
+      const dbx = b2.x - b1.x;
+      const dby = b2.y - b1.y;
+      const den = dax * dby - day * dbx;
+      if (Math.abs(den) < 1e-9) return null;
+      const t = ((b1.x - a1.x) * dby - (b1.y - a1.y) * dbx) / den;
+      const u = ((b1.x - a1.x) * day - (b1.y - a1.y) * dax) / den;
+      if (t <= 0.02 || t >= 0.98 || u <= 0.02 || u >= 0.98) return null;
+      return {
+        x: a1.x + t * dax,
+        y: a1.y + t * day,
+        t,
+        u,
+      };
+    }
+
+    function distAlongPolyline(pts, point) {
+      let best = 0;
+      let bestD = Infinity;
+      let acc = 0;
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1];
+        const b = pts[i];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const seg = Math.hypot(dx, dy) || 1e-9;
+        let t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / (seg * seg);
+        t = Math.max(0, Math.min(1, t));
+        const px = a.x + t * dx;
+        const py = a.y + t * dy;
+        const d = Math.hypot(point.x - px, point.y - py);
+        if (d < bestD) {
+          bestD = d;
+          best = acc + t * seg;
+        }
+        acc += seg;
+      }
+      return best;
+    }
+
+    function linksShareNode(a, b) {
+      return a.from === b.from || a.from === b.to || a.to === b.from || a.to === b.to;
+    }
+
+    function findAllHops(geoms) {
+      /** @type {Map<string, number[]>} linkId -> distances along path */
+      const hops = new Map();
+      for (const g of geoms) hops.set(g.link.id, []);
+
+      for (let i = 0; i < geoms.length; i++) {
+        for (let j = i + 1; j < geoms.length; j++) {
+          const A = geoms[i];
+          const B = geoms[j];
+          if (linksShareNode(A.link, B.link)) continue;
+
+          const hopper = A.link.id > B.link.id ? A : B;
+          const under = hopper === A ? B : A;
+
+          for (let si = 1; si < hopper.pts.length; si++) {
+            for (let sj = 1; sj < under.pts.length; sj++) {
+              const hit = segmentsIntersect(
+                hopper.pts[si - 1],
+                hopper.pts[si],
+                under.pts[sj - 1],
+                under.pts[sj]
+              );
+              if (!hit) continue;
+              const d = distAlongPolyline(hopper.pts, hit);
+              const total = hopper.len;
+              if (d < HOP_SKIP || d > total - HOP_SKIP) continue;
+              hops.get(hopper.link.id).push(d);
+            }
+          }
+        }
+      }
+
+      for (const [id, arr] of hops) {
+        arr.sort((a, b) => a - b);
+        const merged = [];
+        for (const d of arr) {
+          if (!merged.length || d - merged[merged.length - 1] > HOP_R * 2.5) merged.push(d);
+        }
+        hops.set(id, merged);
+      }
+      return hops;
+    }
+
+    function pathDWithHops(pts, hopDists) {
+      if (!pts.length) return "";
+      if (!hopDists.length) {
+        let d = `M ${pts[0].x} ${pts[0].y}`;
+        for (let i = 1; i < pts.length; i++) d += ` L ${pts[i].x} ${pts[i].y}`;
+        return d;
+      }
+
+      const total = polylineLen(pts);
+      const sorted = hopDists.filter((d) => d > HOP_SKIP && d < total - HOP_SKIP).sort((a, b) => a - b);
+      if (!sorted.length) {
+        let d = `M ${pts[0].x} ${pts[0].y}`;
+        for (let i = 1; i < pts.length; i++) d += ` L ${pts[i].x} ${pts[i].y}`;
+        return d;
+      }
+
+      let d = `M ${pts[0].x} ${pts[0].y}`;
+      let cursor = 0;
+      const step = 2;
+
+      for (const hop of sorted) {
+        const enter = hop - HOP_R;
+        const leave = hop + HOP_R;
+        while (cursor + step < enter) {
+          cursor += step;
+          const p = pointAtDistance(pts, cursor);
+          d += ` L ${p.x} ${p.y}`;
+        }
+        const pEnter = pointAtDistance(pts, Math.max(0, enter));
+        const pMid = pointAtDistance(pts, hop);
+        const pLeave = pointAtDistance(pts, Math.min(total, leave));
+        d += ` L ${pEnter.x} ${pEnter.y}`;
+        // Semicircle hop: sweep perpendicular to tangent (left side)
+        const nx = -pMid.ty;
+        const ny = pMid.tx;
+        const apexX = pMid.x + nx * HOP_R;
+        const apexY = pMid.y + ny * HOP_R;
+        d += ` Q ${apexX} ${apexY} ${pLeave.x} ${pLeave.y}`;
+        cursor = leave;
+      }
+
+      while (cursor + step < total) {
+        cursor += step;
+        const p = pointAtDistance(pts, cursor);
+        d += ` L ${p.x} ${p.y}`;
+      }
+      const end = pts[pts.length - 1];
+      d += ` L ${end.x} ${end.y}`;
+      return d;
+    }
+
+    function simplePathD(p1, p2, curve) {
+      if (curve) return `M ${p1.x} ${p1.y} Q ${curve.x} ${curve.y} ${p2.x} ${p2.y}`;
+      return `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y}`;
+    }
+
+    function renderLinks() {
+      linksLayer.innerHTML = "";
+
+      const geoms = [];
+      for (const link of state.links) {
+        const ep = linkEndpoints(link);
+        if (!ep) continue;
+        const pts = sampleLink(ep.p1, ep.p2, ep.curve);
+        geoms.push({
+          link,
+          p1: ep.p1,
+          p2: ep.p2,
+          curve: ep.curve,
+          pts,
+          len: polylineLen(pts),
+        });
+      }
+
+      const hopsMap = findAllHops(geoms);
+
+      for (const g of geoms) {
+        const { link, p1, p2, curve, pts } = g;
         const selected = state.selectedLinks.has(link.id);
         const lineStyle = link.lineStyle === "dotted" ? "dotted" : "solid";
         const arrow = link.arrow === "end" || link.arrow === "both" ? link.arrow : "none";
-        // Stop at box edges (slight outward offset keeps arrow tip outside the stroke)
-        const p1 = boundaryPoint(a, cb.x, cb.y, 1.5);
-        const p2 = boundaryPoint(b, ca.x, ca.y, 1.5);
+        const hopDists = hopsMap.get(link.id) || [];
+        const d =
+          hopDists.length > 0 ? pathDWithHops(pts, hopDists) : simplePathD(p1, p2, curve);
+        const hitD = simplePathD(p1, p2, curve);
 
-        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
-        g.dataset.id = link.id;
+        const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        group.dataset.id = link.id;
 
-        const hit = document.createElementNS("http://www.w3.org/2000/svg", "line");
-        hit.setAttribute("x1", p1.x);
-        hit.setAttribute("y1", p1.y);
-        hit.setAttribute("x2", p2.x);
-        hit.setAttribute("y2", p2.y);
+        const hit = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        hit.setAttribute("d", hitD);
         hit.setAttribute("class", "link-hit");
 
-        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-        line.setAttribute("x1", p1.x);
-        line.setAttribute("y1", p1.y);
-        line.setAttribute("x2", p2.x);
-        line.setAttribute("y2", p2.y);
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        line.setAttribute("d", d);
         line.setAttribute("class", "link-line" + (selected ? " selected" : ""));
         if (lineStyle === "dotted") line.setAttribute("stroke-dasharray", "6 4");
         if (arrow === "end" || arrow === "both") {
@@ -1016,8 +1286,8 @@
           line.setAttribute("marker-start", selected ? "url(#arrow-start-sel)" : "url(#arrow-start)");
         }
 
-        g.appendChild(hit);
-        g.appendChild(line);
+        group.appendChild(hit);
+        group.appendChild(line);
 
         const onSelect = (e) => {
           e.stopPropagation();
@@ -1028,7 +1298,36 @@
         hit.addEventListener("mousedown", onSelect);
         line.addEventListener("mousedown", onSelect);
 
-        linksLayer.appendChild(g);
+        if (selected && state.selectedLinks.size === 1 && state.mode !== "connect") {
+          const handlePt = midHandlePoint(p1, p2, curve);
+          const handle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          handle.setAttribute("class", "link-handle");
+          handle.setAttribute("cx", handlePt.x);
+          handle.setAttribute("cy", handlePt.y);
+          handle.setAttribute("r", 6);
+          handle.addEventListener("mousedown", (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            if (e.button !== 0) return;
+            const p = svgPoint(e);
+            state.curveDrag = {
+              linkId: link.id,
+              // store handle position; convert to control on move
+              startHandle: { x: handlePt.x, y: handlePt.y },
+              origin: { x: p.x, y: p.y },
+            };
+          });
+          handle.addEventListener("dblclick", (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            link.curve = null;
+            renderVisualOnly();
+            showStatus("Link straightened");
+          });
+          group.appendChild(handle);
+        }
+
+        linksLayer.appendChild(group);
       }
     }
 
@@ -1373,6 +1672,11 @@
             </select>
           </div>
           <div class="field">
+            <label>Curve</label>
+            <div class="meta">Drag the blue handle on the line to bend it. Double-click the handle to straighten.</div>
+            ${normalizeCurve(link.curve) ? `<button type="button" id="propStraighten" class="btn-sm" style="margin-top:6px">Straighten</button>` : ""}
+          </div>
+          <div class="field">
             <label>Hint</label>
             <div class="meta">Press Delete to remove this link</div>
           </div>
@@ -1386,6 +1690,14 @@
           link.arrow = v === "end" || v === "both" ? v : "none";
           renderVisualOnly();
         });
+        const btnStraight = document.getElementById("propStraighten");
+        if (btnStraight) {
+          btnStraight.addEventListener("click", () => {
+            link.curve = null;
+            render();
+            showStatus("Link straightened");
+          });
+        }
       }
     }
 
@@ -1474,6 +1786,7 @@
               to: node.id,
               lineStyle: "solid",
               arrow: "none",
+              curve: null,
             });
             showStatus("Connected");
           } else {
@@ -1536,7 +1849,7 @@
       }
       if (e.button !== 0) return;
 
-      if (e.target !== canvas && e.target.closest(".node-group, .flame-group, .link-hit, .link-line")) return;
+      if (e.target !== canvas && e.target.closest(".node-group, .flame-group, .link-hit, .link-line, .link-handle")) return;
 
       if (state.mode === "place" && state.placeType) {
         const p = svgPoint(e);
@@ -1605,6 +1918,37 @@
         applyView();
         return;
       }
+      if (state.curveDrag) {
+        const p = svgPoint(e);
+        const link = findLink(state.curveDrag.linkId);
+        if (!link) return;
+        const handle = {
+          x: state.curveDrag.startHandle.x + (p.x - state.curveDrag.origin.x),
+          y: state.curveDrag.startHandle.y + (p.y - state.curveDrag.origin.y),
+        };
+        const a = findNode(link.from);
+        const b = findNode(link.to);
+        if (!a || !b) return;
+        // Approximate endpoints using previous curve or centers for control conversion
+        const prev = normalizeCurve(link.curve);
+        let p1, p2;
+        if (prev) {
+          p1 = boundaryPoint(a, prev.x, prev.y, 1.5);
+          p2 = boundaryPoint(b, prev.x, prev.y, 1.5);
+        } else {
+          const ca = nodeCenter(a);
+          const cb = nodeCenter(b);
+          p1 = boundaryPoint(a, cb.x, cb.y, 1.5);
+          p2 = boundaryPoint(b, ca.x, ca.y, 1.5);
+        }
+        link.curve = curveFromHandle(p1, p2, handle);
+        // Refine endpoints toward new control and recompute control once
+        p1 = boundaryPoint(a, link.curve.x, link.curve.y, 1.5);
+        p2 = boundaryPoint(b, link.curve.x, link.curve.y, 1.5);
+        link.curve = curveFromHandle(p1, p2, handle);
+        renderVisualOnly();
+        return;
+      }
       if (!state.drag) return;
       const p = svgPoint(e);
       const dx = p.x - state.drag.startX;
@@ -1628,6 +1972,10 @@
       if (state.pan) {
         state.pan = null;
         updateCursor();
+      }
+      if (state.curveDrag) {
+        state.curveDrag = null;
+        render();
       }
       if (state.drag) {
         state.drag = null;
@@ -1793,6 +2141,7 @@
               to: String(l.to),
               lineStyle: l.lineStyle === "dotted" ? "dotted" : "solid",
               arrow: l.arrow === "end" || l.arrow === "both" ? l.arrow : "none",
+              curve: normalizeCurve(l.curve),
             }));
 
           let nextId = Number(data.nextId) || 1;
@@ -1812,6 +2161,7 @@
           state.selectedLinks.clear();
           state.connectFrom = null;
           state.drag = null;
+          state.curveDrag = null;
           state.pan = null;
           if (data.view && typeof data.view.scale === "number") {
             state.view = {
@@ -1880,7 +2230,7 @@
         el.setAttribute("stroke-width", el.classList.contains("selected") ? "3" : "2");
         el.setAttribute("fill", "none");
       });
-      clone.querySelectorAll(".link-hit").forEach((el) => el.remove());
+      clone.querySelectorAll(".link-hit, .link-handle").forEach((el) => el.remove());
       clone.querySelectorAll(".node-group.selected .node-body, .flame-group.selected .node-body").forEach((el) => {
         el.setAttribute("stroke", "#2563eb");
         el.setAttribute("stroke-width", "2.5");
